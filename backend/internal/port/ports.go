@@ -1,0 +1,44 @@
+// Package port defines the interfaces between the use cases and the outside
+// world. New integrations (data sources, storage, notifiers) implement these.
+package port
+
+import (
+	"context"
+	"time"
+
+	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+)
+
+// SnapshotSource is a data provider integration (official site, third-party
+// API, crowdsourcing, camera counting...). Adding a new source means
+// implementing this interface and registering it in cmd/api.
+type SnapshotSource interface {
+	// ID is a short, unique provider id such as "und".
+	ID() string
+	// Interval is how often the source should be polled.
+	Interval() time.Duration
+	// Fetch returns the latest snapshots the source publishes.
+	Fetch(ctx context.Context) ([]domain.Snapshot, error)
+}
+
+// CrossingCatalog is the reference list of known crossings.
+type CrossingCatalog interface {
+	List(ctx context.Context) ([]domain.Crossing, error)
+	Get(ctx context.Context, id domain.CrossingID) (domain.Crossing, error)
+}
+
+// SnapshotRepository persists observations.
+type SnapshotRepository interface {
+	// Save stores snapshots, ignoring exact duplicates
+	// (same crossing, direction, source and observation time).
+	Save(ctx context.Context, snaps []domain.Snapshot) error
+	// Latest returns the newest snapshot per (direction, source) for a crossing.
+	Latest(ctx context.Context, id domain.CrossingID) ([]domain.Snapshot, error)
+	// History returns snapshots for a crossing observed at or after since, oldest first.
+	History(ctx context.Context, id domain.CrossingID, since time.Time) ([]domain.Snapshot, error)
+}
+
+// Estimator turns raw snapshots into a wait estimate.
+type Estimator interface {
+	Estimate(c domain.Crossing, dir domain.Direction, latest []domain.Snapshot) domain.WaitEstimate
+}
