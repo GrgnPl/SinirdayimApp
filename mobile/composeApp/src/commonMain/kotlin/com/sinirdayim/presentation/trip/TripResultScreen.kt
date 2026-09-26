@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinirdayim.domain.model.RestArea
+import com.sinirdayim.domain.model.RestAreaKind
 import com.sinirdayim.domain.model.StepKind
 import com.sinirdayim.domain.model.StopReason
 import com.sinirdayim.domain.model.TripAlternative
@@ -240,19 +242,48 @@ private fun stepIcon(kind: StepKind): Pair<ImageVector, Color> {
 
 private fun stepTitle(step: TripStep, crossingNames: Map<String, String>): String = when (step.kind) {
     StepKind.DRIVE -> "Sürüş · ${formatDuration(step.durationMin)}"
-    StepKind.BREAK -> "${step.durationMin} dk mola"
-    StepKind.DAILY_REST -> "${formatDuration(step.durationMin)} günlük dinlenme"
+    StepKind.BREAK -> "${step.durationMin} dk mola" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
+    StepKind.DAILY_REST -> "${formatDuration(step.durationMin)} dinlenme" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
     StepKind.BORDER_WAIT -> "${crossingNames[step.crossingId] ?: "Sınır"} · ${formatDuration(step.durationMin)} bekleme"
 }
 
 private fun stepSubtitle(step: TripStep): String = when (step.kind) {
     StepKind.DRIVE -> "km ${step.fromKm.roundToInt()} → ${step.toKm.roundToInt()} · ${(step.toKm - step.fromKm).roundToInt()} km"
-    StepKind.BREAK, StepKind.DAILY_REST -> "km ${step.fromKm.roundToInt()} · " + when (step.reason) {
-        StopReason.CONTINUOUS_DRIVING -> "4,5 saat kesintisiz sürüş doldu"
-        StopReason.DAILY_DRIVING -> "Günlük sürüş süresi doldu"
-        StopReason.DUTY_PERIOD -> "13 saatlik görev süresi doldu"
-        null -> "Zorunlu mola"
-    }
+    StepKind.BREAK, StepKind.DAILY_REST -> listOfNotNull(
+        "km ${step.fromKm.roundToInt()}",
+        step.restArea?.facilities()?.takeIf { it.isNotEmpty() },
+        if (step.restArea == null) "yol kenarı – yakında tesis bulunamadı" else null,
+        when (step.reason) {
+            StopReason.CONTINUOUS_DRIVING -> "4,5 saat kesintisiz sürüş"
+            StopReason.DAILY_DRIVING -> "günlük sürüş süresi"
+            StopReason.DUTY_PERIOD -> "13 saatlik görev süresi"
+            null -> null
+        },
+    ).joinToString(" · ")
     StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " +
         if (step.durationMin >= 11 * 60) "günlük dinlenme yerine sayılır" else if (step.durationMin >= 45) "mola yerine sayılır" else "tahmini bekleme"
 }
+
+private fun RestArea.displayName(): String = name ?: when (kind) {
+    RestAreaKind.SERVICES -> "Servis alanı"
+    RestAreaKind.REST_AREA -> "Dinlenme alanı"
+    RestAreaKind.TRUCK_PARKING -> "Tır parkı"
+    RestAreaKind.TRUCK_FUEL -> "Akaryakıt"
+}
+
+/** Known facilities, e.g. "WC, restoran, güvenlikli". */
+private fun RestArea.facilities(): String = listOfNotNull(
+    if (name != null) when (kind) {
+        RestAreaKind.SERVICES -> "servis alanı"
+        RestAreaKind.REST_AREA -> "dinlenme alanı"
+        RestAreaKind.TRUCK_PARKING -> "tır parkı"
+        RestAreaKind.TRUCK_FUEL -> "akaryakıt"
+    } else null,
+    "WC".takeIf { toilets == true },
+    "duş".takeIf { shower == true },
+    "restoran".takeIf { restaurant == true },
+    "güvenlikli".takeIf { supervised == true },
+    "ücretsiz".takeIf { fee == false },
+    "ücretli".takeIf { fee == true },
+    hgvCapacity?.let { "$it tır kapasiteli" },
+).joinToString(", ")

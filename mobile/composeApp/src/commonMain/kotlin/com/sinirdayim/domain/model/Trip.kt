@@ -30,6 +30,22 @@ enum class StepKind { DRIVE, BREAK, DAILY_REST, BORDER_WAIT }
 
 enum class StopReason { CONTINUOUS_DRIVING, DAILY_DRIVING, DUTY_PERIOD }
 
+enum class RestAreaKind { SERVICES, REST_AREA, TRUCK_PARKING, TRUCK_FUEL }
+
+/** A place to stop. Facility flags are null when unknown. */
+data class RestArea(
+    val id: String,
+    val name: String?,
+    val kind: RestAreaKind,
+    val location: GeoPoint,
+    val toilets: Boolean?,
+    val shower: Boolean?,
+    val restaurant: Boolean?,
+    val fee: Boolean?,
+    val supervised: Boolean?,
+    val hgvCapacity: Int?,
+)
+
 data class TripStep(
     val kind: StepKind,
     val start: Instant,
@@ -40,6 +56,7 @@ data class TripStep(
     val location: GeoPoint,
     val reason: StopReason?,
     val crossingId: String?,
+    val restArea: RestArea?,
 )
 
 data class TripCrossing(

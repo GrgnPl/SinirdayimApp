@@ -121,3 +121,85 @@ func TestInvalidState(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// fixedFinder offers places at fixed kilometre marks.
+type fixedFinder struct {
+	places map[float64]string // km -> ref
+	rests  map[float64]bool   // places suitable for a daily rest
+}
+
+func (f fixedFinder) Find(kind Kind, from, to float64) (float64, string, bool) {
+	best, ok := -1.0, false
+	for km := range f.places {
+		if km < from || km > to || (kind == KindDailyRest && !f.rests[km]) {
+			continue
+		}
+		if km > best {
+			best, ok = km, true
+		}
+	}
+	return best, f.places[best], ok
+}
+
+func TestBreakSnapsToLastPlaceBeforeLimit(t *testing.T) {
+	// Split into many short segments like a real route: 7.5 h at 60 km/h.
+	var acts []Activity
+	for range 30 {
+		acts = append(acts, drive(0.25, 60))
+	}
+	// Limit falls at km 270; places at 200 (too early), 240 and 290 (too late).
+	f := fixedFinder{places: map[float64]string{200: "a", 240: "b", 290: "c"}}
+	p, _ := ScheduleWith(acts, depart, DriverState{}, f)
+	eqKinds(t, kinds(p), KindDrive, KindBreak, KindDrive)
+	br := p.Steps[1]
+	if br.Ref != "b" || br.FromKm < 239.99 || br.FromKm > 240.01 {
+		t.Fatalf("break = %+v, want at km 240 (ref b)", br)
+	}
+	if p.Steps[0].Duration != 4*time.Hour {
+		t.Errorf("first drive = %v, want 4h", p.Steps[0].Duration)
+	}
+}
+
+func TestNoPlaceInWindowKeepsRoadStop(t *testing.T) {
+	f := fixedFinder{places: map[float64]string{100: "far"}}
+	p, _ := ScheduleWith([]Activity{drive(7.5, 60)}, depart, DriverState{}, f)
+	if br := p.Steps[1]; br.Ref != "" || br.FromKm != 270 {
+		t.Fatalf("break = %+v, want road stop at km 270", br)
+	}
+}
+
+func TestDailyRestUsesWiderWindowAndSuitablePlaces(t *testing.T) {
+	// Day limit (9 h) reached at km 540 (60 km/h, with a break at 270).
+	f := fixedFinder{
+		places: map[float64]string{450: "parking", 530: "lay-by"},
+		rests:  map[float64]bool{450: true},
+	}
+	p, _ := ScheduleWith([]Activity{drive(12, 60)}, depart, DriverState{ExtendedDaysLeft: 0}, f)
+	var rest *Step
+	for i := range p.Steps {
+		if p.Steps[i].Kind == KindDailyRest {
+			rest = &p.Steps[i]
+		}
+	}
+	if rest == nil || rest.Ref != "parking" || rest.FromKm < 449.99 || rest.FromKm > 450.01 {
+		t.Fatalf("rest = %+v, want at km 450 (parking)", rest)
+	}
+}
+
+func TestDayEndsEarlyAtGoodPlaceInsteadOfLateBreak(t *testing.T) {
+	// 10 h day available. Continuous limit at 4.5 h (km 270), again at 9 h
+	// (km 540 after the first break); the day ends at 10 h (km 600). At the
+	// second break the day has only 1 h left, so the rest is taken at the
+	// truck parking (km 500) instead of a break at km 540 and a roadside
+	// rest at km 600. The remaining 220 km (3 h 40) need no further break.
+	f := fixedFinder{
+		places: map[float64]string{500: "parking"},
+		rests:  map[float64]bool{500: true},
+	}
+	p, _ := ScheduleWith([]Activity{drive(12, 60)}, depart, DriverState{ExtendedDaysLeft: 1}, f)
+	eqKinds(t, kinds(p), KindDrive, KindBreak, KindDrive, KindDailyRest, KindDrive)
+	rest := p.Steps[3]
+	if rest.Ref != "parking" || rest.FromKm < 499.99 || rest.FromKm > 500.01 || rest.Reason != ReasonDaily {
+		t.Fatalf("rest = %+v, want daily rest at km 500", rest)
+	}
+}

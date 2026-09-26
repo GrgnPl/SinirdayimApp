@@ -53,3 +53,18 @@ type Router interface {
 type Geocoder interface {
 	Search(ctx context.Context, query string, limit int) ([]domain.Place, error)
 }
+
+// RestAreaSource provides stopping places (OSM, operator feeds, user reports).
+type RestAreaSource interface {
+	ID() string
+	Interval() time.Duration
+	Fetch(ctx context.Context) ([]domain.RestArea, error)
+}
+
+// RestAreaStore keeps the known stopping places.
+type RestAreaStore interface {
+	// Replace swaps all places previously stored for sourceID.
+	Replace(ctx context.Context, sourceID string, areas []domain.RestArea) error
+	// InBounds returns places inside the south-west / north-east box.
+	InBounds(ctx context.Context, sw, ne domain.GeoPoint) ([]domain.RestArea, error)
+}

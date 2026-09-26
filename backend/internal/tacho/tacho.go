@@ -9,12 +9,17 @@
 //   - Waiting at a border with the engine off counts as a break when it lasts
 //     45 min or more, and as a daily rest when it lasts 11h or more.
 //
+// Stops are placed as late as the rules allow. With a StopFinder, a stop is
+// pulled back to the last suitable place (rest area, truck parking) within a
+// search window before the limit.
+//
 // Not yet modeled: reduced daily rest (9h), split breaks, weekly limits
 // (56h / 90h) and weekly rest.
 package tacho
 
 import (
 	"errors"
+	"sort"
 	"time"
 )
 
@@ -25,7 +30,20 @@ const (
 	ExtendedDailyDriving = 10 * time.Hour
 	DailyRestDuration    = 11 * time.Hour
 	MaxDutyPeriod        = 24*time.Hour - DailyRestDuration // 13h
+
+	// How much driving before a limit a stop may be pulled back to reach a
+	// proper place. Daily rests deserve a longer search: a safe spot for the
+	// night matters more than a few extra kilometres.
+	BreakSearchWindow = 45 * time.Minute
+	RestSearchWindow  = 2 * time.Hour
 )
+
+// StopFinder picks where to stop. Find returns the position (km along the
+// route) of the best place for a stop of the given kind within [fromKm, toKm],
+// with an opaque reference to it.
+type StopFinder interface {
+	Find(kind Kind, fromKm, toKm float64) (km float64, ref string, ok bool)
+}
 
 // Kind of an activity in the input or output timeline.
 type Kind string
@@ -86,8 +104,13 @@ const (
 var ErrInvalidState = errors.New("tacho: invalid driver state")
 
 // Schedule walks the activities and inserts breaks and daily rests as late as
-// the rules allow.
+// the rules allow, at arbitrary points on the road.
 func Schedule(activities []Activity, depart time.Time, st DriverState) (Plan, error) {
+	return ScheduleWith(activities, depart, st, nil)
+}
+
+// ScheduleWith is Schedule with stops snapped to places chosen by finder.
+func ScheduleWith(activities []Activity, depart time.Time, st DriverState, finder StopFinder) (Plan, error) {
 	if st.ContinuousDriving < 0 || st.DailyDriving < 0 || st.ExtendedDaysLeft < 0 ||
 		st.ContinuousDriving > MaxContinuousDriving || st.DailyDriving > ExtendedDailyDriving {
 		return Plan{}, ErrInvalidState
@@ -98,6 +121,8 @@ func Schedule(activities []Activity, depart time.Time, st DriverState) (Plan, er
 		daily:        st.DailyDriving,
 		dutyStart:    st.DutyStartedAt,
 		extendedLeft: st.ExtendedDaysLeft,
+		finder:       finder,
+		track:        newTrack(activities),
 		plan:         Plan{Departure: depart},
 	}
 	if s.dutyStart.IsZero() || s.dutyStart.After(depart) {
@@ -105,26 +130,33 @@ func Schedule(activities []Activity, depart time.Time, st DriverState) (Plan, er
 	}
 	s.dailyLimit = s.pickDailyLimit()
 
+	// Driving between border waits is one continuous stretch, so a stop can
+	// be placed anywhere in it regardless of how the route was segmented.
+	var driven time.Duration
 	for _, a := range activities {
 		switch a.Kind {
 		case KindDrive:
-			s.drive(a)
+			driven += max(a.Duration, 0)
 		case KindBorderWait:
+			s.driveUntil(driven)
 			s.wait(a)
 		}
 	}
+	s.driveUntil(driven)
 	s.plan.Arrival = s.now
 	return s.plan, nil
 }
 
 type scheduler struct {
 	now          time.Time
-	km           float64
+	pos          time.Duration // driving time done along the route
 	cont         time.Duration
 	daily        time.Duration
 	dailyLimit   time.Duration
 	dutyStart    time.Time
 	extendedLeft int
+	finder       StopFinder
+	track        track
 	plan         Plan
 }
 
@@ -136,64 +168,104 @@ func (s *scheduler) pickDailyLimit() time.Duration {
 	return MaxDailyDriving
 }
 
-func (s *scheduler) drive(a Activity) {
-	remaining := a.Duration
-	if remaining <= 0 {
-		s.km += a.DistanceKm
-		return
-	}
-	speed := a.DistanceKm / a.Duration.Hours() // km per hour for this segment
-
-	for remaining > 0 {
+// driveUntil drives to route driving time end, stopping whenever a limit
+// is reached.
+func (s *scheduler) driveUntil(end time.Duration) {
+	for s.pos < end {
+		contLeft := MaxContinuousDriving - s.cont
+		dailyLeft := s.dailyLimit - s.daily
 		dutyLeft := s.dutyStart.Add(MaxDutyPeriod).Sub(s.now)
-		allowed := min(remaining, MaxContinuousDriving-s.cont, s.dailyLimit-s.daily, dutyLeft)
+		budget := min(contLeft, dailyLeft, dutyLeft)
 
-		if allowed <= 0 {
-			switch {
-			case s.daily >= s.dailyLimit:
-				s.dailyRest(ReasonDaily)
-			case dutyLeft <= 0:
-				s.dailyRest(ReasonDuty)
-			default:
-				s.takeBreak(ReasonContinuous)
-			}
-			continue
+		kind, reason := KindBreak, ReasonContinuous
+		switch budget {
+		case dailyLeft:
+			kind, reason = KindDailyRest, ReasonDaily
+		case dutyLeft:
+			kind, reason = KindDailyRest, ReasonDuty
 		}
 
-		dist := speed * allowed.Hours()
-		s.addDrive(allowed, dist)
-		remaining -= allowed
+		if budget <= 0 {
+			s.stop(kind, reason, "")
+			continue
+		}
+		target := s.pos + budget
+		if target >= end {
+			s.advance(end)
+			return
+		}
+
+		// A break shortly before the day ends would leave only a short
+		// stretch to find a place for the night. If a good place for the
+		// daily rest is within reach now, end the day there instead.
+		dayLeft := min(dailyLeft, dutyLeft)
+		if kind == KindBreak && s.finder != nil && dayLeft-contLeft < RestSearchWindow {
+			from := s.track.kmAt(max(s.pos, target-RestSearchWindow))
+			if km, r, ok := s.finder.Find(KindDailyRest, from, s.track.kmAt(target)); ok {
+				rest := ReasonDaily
+				if dutyLeft < dailyLeft {
+					rest = ReasonDuty
+				}
+				s.advance(min(max(s.track.timeAt(km), s.pos), target))
+				s.stop(KindDailyRest, rest, r)
+				continue
+			}
+		}
+
+		stopAt, ref := target, ""
+		if s.finder != nil {
+			window := BreakSearchWindow
+			if kind == KindDailyRest {
+				window = RestSearchWindow
+			}
+			from := s.track.kmAt(max(s.pos, target-window))
+			to := s.track.kmAt(target)
+			if km, r, ok := s.finder.Find(kind, from, to); ok && km >= from && km <= to {
+				stopAt, ref = min(max(s.track.timeAt(km), s.pos), target), r
+			}
+		}
+		s.advance(stopAt)
+		s.stop(kind, reason, ref)
 	}
 }
 
-func (s *scheduler) addDrive(d time.Duration, km float64) {
+// advance drives from the current position to route driving time t.
+func (s *scheduler) advance(t time.Duration) {
+	d := t - s.pos
+	if d <= 0 {
+		return
+	}
+	from, to := s.track.kmAt(s.pos), s.track.kmAt(t)
 	// Merge with the previous drive step so the timeline stays readable.
 	if n := len(s.plan.Steps); n > 0 && s.plan.Steps[n-1].Kind == KindDrive {
 		last := &s.plan.Steps[n-1]
 		last.Duration += d
-		last.ToKm += km
+		last.ToKm = to
 	} else {
-		s.plan.Steps = append(s.plan.Steps, Step{Kind: KindDrive, Start: s.now, Duration: d, FromKm: s.km, ToKm: s.km + km})
+		s.plan.Steps = append(s.plan.Steps, Step{Kind: KindDrive, Start: s.now, Duration: d, FromKm: from, ToKm: to})
 	}
 	s.now = s.now.Add(d)
-	s.km += km
+	s.pos = t
 	s.cont += d
 	s.daily += d
 	s.plan.Driving += d
 }
 
-func (s *scheduler) takeBreak(reason string) {
-	s.plan.Steps = append(s.plan.Steps, Step{Kind: KindBreak, Start: s.now, Duration: BreakDuration, FromKm: s.km, ToKm: s.km, Reason: reason})
-	s.now = s.now.Add(BreakDuration)
-	s.cont = 0
-	s.plan.Breaks += BreakDuration
-}
-
-func (s *scheduler) dailyRest(reason string) {
-	s.plan.Steps = append(s.plan.Steps, Step{Kind: KindDailyRest, Start: s.now, Duration: DailyRestDuration, FromKm: s.km, ToKm: s.km, Reason: reason})
-	s.now = s.now.Add(DailyRestDuration)
-	s.plan.DailyRests += DailyRestDuration
-	s.resetDay()
+func (s *scheduler) stop(kind Kind, reason, ref string) {
+	km := s.track.kmAt(s.pos)
+	d := BreakDuration
+	if kind == KindDailyRest {
+		d = DailyRestDuration
+	}
+	s.plan.Steps = append(s.plan.Steps, Step{Kind: kind, Start: s.now, Duration: d, FromKm: km, ToKm: km, Reason: reason, Ref: ref})
+	s.now = s.now.Add(d)
+	if kind == KindDailyRest {
+		s.plan.DailyRests += d
+		s.resetDay()
+	} else {
+		s.plan.Breaks += d
+		s.cont = 0
+	}
 }
 
 func (s *scheduler) resetDay() {
@@ -210,7 +282,8 @@ func (s *scheduler) wait(a Activity) {
 	if a.Duration <= 0 {
 		return
 	}
-	s.plan.Steps = append(s.plan.Steps, Step{Kind: KindBorderWait, Start: s.now, Duration: a.Duration, FromKm: s.km, ToKm: s.km, Ref: a.Ref})
+	km := s.track.kmAt(s.pos)
+	s.plan.Steps = append(s.plan.Steps, Step{Kind: KindBorderWait, Start: s.now, Duration: a.Duration, FromKm: km, ToKm: km, Ref: a.Ref})
 	s.now = s.now.Add(a.Duration)
 	s.plan.BorderWaits += a.Duration
 	switch {
@@ -219,4 +292,59 @@ func (s *scheduler) wait(a Activity) {
 	case a.Duration >= BreakDuration:
 		s.cont = 0
 	}
+}
+
+// track maps driving time along the route to distance and back, as a
+// piecewise-linear function built from the drive activities.
+type track struct {
+	t  []time.Duration
+	km []float64
+}
+
+func newTrack(activities []Activity) track {
+	tr := track{t: []time.Duration{0}, km: []float64{0}}
+	var t time.Duration
+	var km float64
+	for _, a := range activities {
+		if a.Kind != KindDrive {
+			continue
+		}
+		t += max(a.Duration, 0)
+		km += a.DistanceKm
+		tr.t = append(tr.t, t)
+		tr.km = append(tr.km, km)
+	}
+	return tr
+}
+
+func (tr track) kmAt(t time.Duration) float64 {
+	i := sort.Search(len(tr.t), func(i int) bool { return tr.t[i] >= t })
+	switch {
+	case i == 0:
+		return tr.km[0]
+	case i >= len(tr.t):
+		return tr.km[len(tr.km)-1]
+	}
+	span := tr.t[i] - tr.t[i-1]
+	if span <= 0 {
+		return tr.km[i]
+	}
+	f := float64(t-tr.t[i-1]) / float64(span)
+	return tr.km[i-1] + (tr.km[i]-tr.km[i-1])*f
+}
+
+func (tr track) timeAt(km float64) time.Duration {
+	i := sort.SearchFloat64s(tr.km, km)
+	switch {
+	case i == 0:
+		return tr.t[0]
+	case i >= len(tr.km):
+		return tr.t[len(tr.t)-1]
+	}
+	span := tr.km[i] - tr.km[i-1]
+	if span <= 0 {
+		return tr.t[i]
+	}
+	f := (km - tr.km[i-1]) / span
+	return tr.t[i-1] + time.Duration(float64(tr.t[i]-tr.t[i-1])*f)
 }

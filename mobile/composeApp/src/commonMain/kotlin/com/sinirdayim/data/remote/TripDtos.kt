@@ -67,6 +67,21 @@ data class TripStepDto(
     val location: GeoPointDto,
     val reason: String? = null,
     val crossingId: String? = null,
+    val restArea: RestAreaDto? = null,
+)
+
+@Serializable
+data class RestAreaDto(
+    val id: String,
+    val name: String? = null,
+    val kind: String,
+    val location: GeoPointDto,
+    val toilets: Boolean? = null,
+    val shower: Boolean? = null,
+    val restaurant: Boolean? = null,
+    val fee: Boolean? = null,
+    val supervised: Boolean? = null,
+    val hgvCapacity: Int? = null,
 )
 
 @Serializable

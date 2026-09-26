@@ -123,3 +123,34 @@ func TestPlanIgnoresFarCrossings(t *testing.T) {
 		t.Errorf("crossings = %+v", plan.Crossings)
 	}
 }
+
+func TestPlanPutsBreakAtRestArea(t *testing.T) {
+	// Straight road north from Hopa, 6 h at 60 km/h: one break needed at 4.5 h (270 km).
+	far := domain.GeoPoint{Lat: 41.40 + 360.0/111.2, Lng: 41.43}
+	at := func(km float64) domain.GeoPoint { return domain.GeoPoint{Lat: 41.40 + km/111.2, Lng: 41.43} }
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{at(100), at(200), at(250), at(300)}, kmh: 60})
+	store := memory.NewRestAreas()
+	store.Replace(context.Background(), "test", []domain.RestArea{
+		{ID: "early", Kind: domain.RestAreaServices, Location: at(150)},
+		{ID: "good", Name: "Kaçkar Tesisleri", Kind: domain.RestAreaServices, Location: domain.GeoPoint{Lat: at(240).Lat, Lng: 41.435}},
+		{ID: "offroad", Kind: domain.RestAreaServices, Location: domain.GeoPoint{Lat: at(260).Lat, Lng: 41.60}},
+	})
+	svc.RestAreas = store
+
+	plan, err := svc.Plan(context.Background(), TripRequest{Origin: hopa, Destination: far, DepartAt: depart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var br *TripStep
+	for i := range plan.Steps {
+		if plan.Steps[i].Kind == tacho.KindBreak {
+			br = &plan.Steps[i]
+		}
+	}
+	if br == nil || br.RestArea == nil || br.RestArea.ID != "good" {
+		t.Fatalf("break = %+v, want at rest area 'good'", br)
+	}
+	if br.Location != br.RestArea.Location {
+		t.Errorf("break location %v should be the rest area's %v", br.Location, br.RestArea.Location)
+	}
+}

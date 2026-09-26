@@ -56,6 +56,9 @@ type TripStep struct {
 	Location    domain.GeoPoint `json:"location"` // where the step starts
 	Reason      string          `json:"reason,omitempty"`
 	CrossingID  string          `json:"crossingId,omitempty"`
+	// RestArea is where a break or daily rest is planned, when a suitable
+	// place was found near the limit; otherwise the stop is on the road.
+	RestArea *domain.RestArea `json:"restArea,omitempty"`
 }
 
 type TripTotals struct {
@@ -96,6 +99,21 @@ type TripService struct {
 	Router  port.Router
 	Catalog port.CrossingCatalog
 	Status  *StatusService
+	// RestAreas is optional; without it stops are placed on the road.
+	RestAreas port.RestAreaStore
+}
+
+// routed is a computed route with everything needed to schedule it again.
+type routed struct {
+	route      domain.Route
+	cum        []float64
+	crossings  []CrossingOnRoute
+	activities []tacho.Activity
+}
+
+type planned struct {
+	plan TripPlan
+	r    *routed
 }
 
 // Plan evaluates the direct route and routes forced through each plausible
@@ -108,8 +126,8 @@ func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, erro
 	}
 
 	type result struct {
-		plan TripPlan
-		err  error
+		p   planned
+		err error
 	}
 	results := make([]result, len(candidates)+1)
 	var wg sync.WaitGroup
@@ -127,12 +145,12 @@ func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, erro
 	}
 	wg.Wait()
 
-	var plans []TripPlan
+	var plans []planned
 	var firstErr error
 	for _, r := range results {
 		switch {
 		case r.err == nil:
-			plans = append(plans, r.plan)
+			plans = append(plans, r.p)
 		case firstErr == nil:
 			firstErr = r.err
 		}
@@ -141,10 +159,17 @@ func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, erro
 		return TripPlan{}, firstErr
 	}
 	plans = dedupeByCrossings(plans)
-	sort.SliceStable(plans, func(i, j int) bool { return better(plans[i], plans[j]) })
+	sort.SliceStable(plans, func(i, j int) bool { return better(plans[i].plan, plans[j].plan) })
 
-	best := plans[0]
-	for i, p := range plans {
+	// Candidates are compared with stops on the road; only the chosen route
+	// is rescheduled around real rest areas.
+	best, err := s.withRestAreas(ctx, req, plans[0])
+	if err != nil {
+		return TripPlan{}, err
+	}
+	plans[0].plan = best
+	for i, pl := range plans {
+		p := pl.plan
 		best.Alternatives = append(best.Alternatives, TripAlternative{
 			Via:           crossingNames(p),
 			DistanceKm:    p.DistanceKm,
@@ -209,13 +234,13 @@ func better(a, b TripPlan) bool {
 }
 
 // dedupeByCrossings keeps the fastest plan for each sequence of crossings.
-func dedupeByCrossings(plans []TripPlan) []TripPlan {
+func dedupeByCrossings(plans []planned) []planned {
 	best := map[string]int{}
-	var out []TripPlan
+	var out []planned
 	for _, p := range plans {
-		key := strings.Join(crossingNames(p), "|")
+		key := strings.Join(crossingNames(p.plan), "|")
 		if i, ok := best[key]; ok {
-			if p.Arrival.Before(out[i].Arrival) {
+			if p.plan.Arrival.Before(out[i].plan.Arrival) {
 				out[i] = p
 			}
 			continue
@@ -234,61 +259,107 @@ func crossingNames(p TripPlan) []string {
 	return names
 }
 
-// planRoute routes (optionally through via points) and schedules the trip.
-func (s *TripService) planRoute(ctx context.Context, req TripRequest, via []domain.GeoPoint) (TripPlan, error) {
+// planRoute routes (optionally through via points) and schedules the trip
+// with stops on the road.
+func (s *TripService) planRoute(ctx context.Context, req TripRequest, via []domain.GeoPoint) (planned, error) {
 	route, err := s.Router.Route(ctx, req.Origin, req.Destination, via...)
 	if err != nil {
-		return TripPlan{}, err
+		return planned{}, err
 	}
 	if len(route.Shape) < 2 {
-		return TripPlan{}, fmt.Errorf("%w: empty route", domain.ErrNoRoute)
+		return planned{}, fmt.Errorf("%w: empty route", domain.ErrNoRoute)
 	}
 	cum := geo.Cumulative(route.Shape)
 
 	crossings, idxs, err := s.crossingsOnRoute(ctx, route, cum)
 	if err != nil {
-		return TripPlan{}, err
+		return planned{}, err
 	}
+	r := &routed{route: route, cum: cum, crossings: crossings, activities: buildActivities(route, cum, crossings, idxs)}
 
-	activities := buildActivities(route, cum, crossings, idxs)
-	plan, err := tacho.Schedule(activities, req.DepartAt, req.Driver)
+	sched, err := tacho.Schedule(r.activities, req.DepartAt, req.Driver)
+	if err != nil {
+		return planned{}, err
+	}
+	return planned{plan: assemble(r, sched, nil), r: r}, nil
+}
+
+// withRestAreas reschedules a route so breaks and rests fall on real places.
+// Without a store, or when none is near the route, the plan is unchanged.
+func (s *TripService) withRestAreas(ctx context.Context, req TripRequest, p planned) (TripPlan, error) {
+	if s.RestAreas == nil {
+		return p.plan, nil
+	}
+	sw, ne := bounds(p.r.route.Shape, 0.05)
+	areas, err := s.RestAreas.InBounds(ctx, sw, ne)
 	if err != nil {
 		return TripPlan{}, err
 	}
+	stops := newRouteStops(areas, p.r.route.Shape, p.r.cum)
+	if len(stops.items) == 0 {
+		return p.plan, nil
+	}
+	sched, err := tacho.ScheduleWith(p.r.activities, req.DepartAt, req.Driver, stops)
+	if err != nil {
+		return TripPlan{}, err
+	}
+	return assemble(p.r, sched, stops), nil
+}
 
+// assemble turns a schedule into the API plan.
+func assemble(r *routed, sched tacho.Plan, stops *routeStops) TripPlan {
 	allKnown := true
-	for _, c := range crossings {
+	for _, c := range r.crossings {
 		allKnown = allKnown && c.WaitKnown
 	}
 	out := TripPlan{
-		DistanceKm:    cum[len(cum)-1],
-		Departure:     plan.Departure,
-		Arrival:       plan.Arrival,
-		Crossings:     crossings,
-		Polyline:      route.Polyline,
+		DistanceKm:    r.cum[len(r.cum)-1],
+		Departure:     sched.Departure,
+		Arrival:       sched.Arrival,
+		Crossings:     r.crossings,
+		Polyline:      r.route.Polyline,
 		AllWaitsKnown: allKnown,
 		Totals: TripTotals{
-			DrivingMin:    minutes(plan.Driving),
-			BreakMin:      minutes(plan.Breaks),
-			DailyRestMin:  minutes(plan.DailyRests),
-			BorderWaitMin: minutes(plan.BorderWaits),
-			TotalMin:      minutes(plan.Arrival.Sub(plan.Departure)),
+			DrivingMin:    minutes(sched.Driving),
+			BreakMin:      minutes(sched.Breaks),
+			DailyRestMin:  minutes(sched.DailyRests),
+			BorderWaitMin: minutes(sched.BorderWaits),
+			TotalMin:      minutes(sched.Arrival.Sub(sched.Departure)),
 		},
 	}
-	for _, st := range plan.Steps {
-		out.Steps = append(out.Steps, TripStep{
+	for _, st := range sched.Steps {
+		step := TripStep{
 			Kind:        st.Kind,
 			Start:       st.Start,
 			End:         st.Start.Add(st.Duration),
 			DurationMin: minutes(st.Duration),
 			FromKm:      st.FromKm,
 			ToKm:        st.ToKm,
-			Location:    geo.PointAtKm(route.Shape, cum, st.FromKm),
+			Location:    geo.PointAtKm(r.route.Shape, r.cum, st.FromKm),
 			Reason:      st.Reason,
-			CrossingID:  st.Ref,
-		})
+		}
+		switch {
+		case st.Kind == tacho.KindBorderWait:
+			step.CrossingID = st.Ref
+		case st.Ref != "" && stops != nil:
+			if a, ok := stops.byID[st.Ref]; ok {
+				step.RestArea = &a
+				step.Location = a.Location
+			}
+		}
+		out.Steps = append(out.Steps, step)
 	}
-	return out, nil
+	return out
+}
+
+// bounds returns the south-west and north-east corners around the points.
+func bounds(points []domain.GeoPoint, pad float64) (domain.GeoPoint, domain.GeoPoint) {
+	sw, ne := points[0], points[0]
+	for _, p := range points {
+		sw.Lat, sw.Lng = min(sw.Lat, p.Lat), min(sw.Lng, p.Lng)
+		ne.Lat, ne.Lng = max(ne.Lat, p.Lat), max(ne.Lng, p.Lng)
+	}
+	return domain.GeoPoint{Lat: sw.Lat - pad, Lng: sw.Lng - pad}, domain.GeoPoint{Lat: ne.Lat + pad, Lng: ne.Lng + pad}
 }
 
 // crossingsOnRoute returns known crossings the route passes, ordered along

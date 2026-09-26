@@ -4,6 +4,8 @@ package com.sinirdayim.data.remote
 
 import com.sinirdayim.domain.model.GeoPoint
 import com.sinirdayim.domain.model.Place
+import com.sinirdayim.domain.model.RestArea
+import com.sinirdayim.domain.model.RestAreaKind
 import com.sinirdayim.domain.model.StepKind
 import com.sinirdayim.domain.model.StopReason
 import com.sinirdayim.domain.model.TripAlternative
@@ -64,5 +66,24 @@ private fun TripStepDto.toDomainOrNull(): TripStep? {
             else -> null
         },
         crossingId = crossingId,
+        restArea = restArea?.toDomain(),
     )
 }
+
+private fun RestAreaDto.toDomain() = RestArea(
+    id = id,
+    name = name?.takeIf { it.isNotBlank() },
+    kind = when (kind) {
+        "services" -> RestAreaKind.SERVICES
+        "truck_parking" -> RestAreaKind.TRUCK_PARKING
+        "truck_fuel" -> RestAreaKind.TRUCK_FUEL
+        else -> RestAreaKind.REST_AREA
+    },
+    location = GeoPoint(location.lat, location.lng),
+    toilets = toilets,
+    shower = shower,
+    restaurant = restaurant,
+    fee = fee,
+    supervised = supervised,
+    hgvCapacity = hgvCapacity,
+)
