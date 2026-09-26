@@ -1,16 +1,21 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// Shared code: domain, data and the whole Compose UI for Android and iOS.
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.androidMultiplatformLibrary)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
 }
 
 kotlin {
-    androidTarget {
+    androidLibrary {
+        namespace = "com.sinirdayim.shared"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        androidResources { enable = true }
     }
 
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
@@ -36,9 +41,9 @@ kotlin {
             implementation(libs.lifecycle.viewmodel.compose)
             implementation(libs.lifecycle.runtime.compose)
             implementation(libs.navigation.compose)
+            implementation(libs.maplibre.compose)
         }
         androidMain.dependencies {
-            implementation(libs.androidx.activity.compose)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
         }
@@ -50,36 +55,5 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
         }
-    }
-}
-
-android {
-    namespace = "com.sinirdayim"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-
-    defaultConfig {
-        applicationId = "com.sinirdayim"
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
-    }
-    buildFeatures { buildConfig = true }
-    buildTypes {
-        debug {
-            // Emulator reaches the host machine through 10.0.2.2. Override with -PapiBaseUrl=...
-            val apiBaseUrl = providers.gradleProperty("apiBaseUrl").getOrElse("http://10.0.2.2:8080")
-            buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
-        }
-        release {
-            isMinifyEnabled = false
-            manifestPlaceholders["usesCleartextTraffic"] = "false"
-            buildConfigField("String", "API_BASE_URL", "\"https://api.sinirdayim.com\"")
-        }
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 }

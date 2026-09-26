@@ -31,14 +31,14 @@ fun TripPlanDto.toDomain() = TripPlan(
     totals = TripTotals(totals.drivingMin, totals.breakMin, totals.dailyRestMin, totals.borderWaitMin, totals.totalMin),
     crossings = crossings.map {
         val est = it.estimate.toDomain()
-        TripCrossing(it.id, it.name, it.from, it.to, it.atKm, est.waitMinutes, est.level)
+        TripCrossing(it.id, it.name, GeoPoint(it.location.lat, it.location.lng), it.from, it.to, it.atKm, est.waitMinutes, est.level)
     },
     steps = steps.mapNotNull { it.toDomainOrNull() },
     allWaitsKnown = allWaitsKnown,
     alternatives = alternatives.map {
         TripAlternative(it.via, it.distanceKm, it.totalMin, it.borderWaitMin, it.allWaitsKnown, it.selected)
     },
-    polyline = polyline,
+    route = decodePolyline(polyline),
 )
 
 private fun TripStepDto.toDomainOrNull(): TripStep? {

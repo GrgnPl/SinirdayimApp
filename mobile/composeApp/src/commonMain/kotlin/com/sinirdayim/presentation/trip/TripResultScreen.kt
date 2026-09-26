@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,8 @@ import com.sinirdayim.domain.model.TripAlternative
 import com.sinirdayim.domain.model.TripPlan
 import com.sinirdayim.domain.model.TripStep
 import com.sinirdayim.presentation.components.StatTile
+import com.sinirdayim.presentation.map.RestColor
+import com.sinirdayim.presentation.map.TripMap
 import com.sinirdayim.presentation.theme.LocalLevelColors
 import com.sinirdayim.presentation.util.formatClock
 import com.sinirdayim.presentation.util.formatDuration
@@ -78,6 +81,10 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
             style = MaterialTheme.typography.headlineSmall,
             color = colors.onBackground,
         )
+
+        key(plan) {
+            TripMap(plan, Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large))
+        }
 
         ArrivalHero(plan)
 
@@ -226,7 +233,7 @@ private fun stepIcon(kind: StepKind): Pair<ImageVector, Color> {
     return when (kind) {
         StepKind.DRIVE -> Icons.Rounded.LocalShipping to MaterialTheme.colorScheme.onSurface
         StepKind.BREAK -> Icons.Rounded.LocalCafe to levels.medium
-        StepKind.DAILY_REST -> Icons.Rounded.Hotel to Color(0xFF5B6CFF)
+        StepKind.DAILY_REST -> Icons.Rounded.Hotel to RestColor
         StepKind.BORDER_WAIT -> Icons.Rounded.Flag to levels.high
     }
 }

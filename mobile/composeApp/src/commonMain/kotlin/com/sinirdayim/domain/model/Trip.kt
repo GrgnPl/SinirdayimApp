@@ -45,6 +45,7 @@ data class TripStep(
 data class TripCrossing(
     val id: String,
     val name: String,
+    val location: GeoPoint,
     val from: String,
     val to: String,
     val atKm: Double,
@@ -78,5 +79,5 @@ data class TripPlan(
     val steps: List<TripStep>,
     val allWaitsKnown: Boolean,
     val alternatives: List<TripAlternative>,
-    val polyline: String,
+    val route: List<GeoPoint>,
 )

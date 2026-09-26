@@ -52,6 +52,7 @@ data class TripCrossingDto(
     val from: String,
     val to: String,
     val atKm: Double,
+    val location: GeoPointDto,
     val estimate: WaitEstimateDto,
 )
 

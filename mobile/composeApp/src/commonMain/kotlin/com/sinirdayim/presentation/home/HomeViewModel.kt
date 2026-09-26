@@ -18,7 +18,12 @@ data class HomeUiState(
     val crossings: List<CrossingStatus> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
+    val showMap: Boolean = false,
+    val selectedOnMap: String? = null,
 ) {
+    val selected: CrossingStatus?
+        get() = crossings.firstOrNull { it.crossing.id == selectedOnMap }
+
     val visible: List<CrossingStatus>
         get() = if (query.isBlank()) crossings
         else crossings.filter { it.crossing.name.contains(query.trim(), ignoreCase = true) }
@@ -53,4 +58,8 @@ class HomeViewModel(private val getCrossings: GetCrossingsUseCase) : ViewModel()
     }
 
     fun search(query: String) = _state.update { it.copy(query = query) }
+
+    fun toggleMap() = _state.update { it.copy(showMap = !it.showMap, selectedOnMap = null) }
+
+    fun selectOnMap(id: String?) = _state.update { it.copy(selectedOnMap = id) }
 }

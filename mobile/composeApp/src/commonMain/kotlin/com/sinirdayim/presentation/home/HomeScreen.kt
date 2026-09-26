@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -30,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +45,7 @@ import com.sinirdayim.domain.model.CrossingStatus
 import com.sinirdayim.domain.model.Direction
 import com.sinirdayim.presentation.components.DirectionToggle
 import com.sinirdayim.presentation.components.LevelDot
+import com.sinirdayim.presentation.map.CrossingsMap
 import com.sinirdayim.presentation.theme.LocalLevelColors
 import com.sinirdayim.presentation.util.flagEmoji
 import com.sinirdayim.presentation.util.formatDurationShort
@@ -56,6 +61,11 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    if (state.showMap) {
+        MapMode(state, viewModel, onOpen)
+        return
+    }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
         PullToRefreshBox(
             isRefreshing = state.isLoading && state.crossings.isNotEmpty(),
@@ -66,14 +76,8 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                item { Header() }
-                item {
-                    DirectionToggle(
-                        selected = state.direction,
-                        onSelect = viewModel::selectDirection,
-                        labels = { if (it == Direction.EXPORT) "Türkiye'den çıkış" else "Türkiye'ye giriş" },
-                    )
-                }
+                item { Header(showMap = false, onToggle = viewModel::toggleMap) }
+                item { HomeDirectionToggle(state.direction, viewModel::selectDirection) }
                 item { SearchField(state.query, viewModel::search) }
 
                 when {
@@ -92,14 +96,70 @@ fun HomeScreen(
 }
 
 @Composable
-private fun Header() {
-    Column(Modifier.padding(bottom = 8.dp)) {
-        Text("Sınır Kapıları", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
-        Text(
-            "Tır yoğunluğu ve tahmini bekleme",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+private fun MapMode(state: HomeUiState, viewModel: HomeViewModel, onOpen: (String, Direction) -> Unit) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Recreate the map when the direction changes so dot colors follow it.
+        key(state.direction, state.crossings) {
+            CrossingsMap(
+                crossings = state.crossings,
+                direction = state.direction,
+                onSelect = viewModel::selectOnMap,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(
+            Modifier
+                .safeDrawingPadding()
+                .padding(16.dp)
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Header(showMap = true, onToggle = viewModel::toggleMap, compact = true)
+            HomeDirectionToggle(state.direction, viewModel::selectDirection)
+        }
+        state.selected?.let { item ->
+            Box(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(16.dp)) {
+                CrossingCard(item, state.direction, onClick = { onOpen(item.crossing.id, state.direction) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeDirectionToggle(direction: Direction, onSelect: (Direction) -> Unit) {
+    DirectionToggle(
+        selected = direction,
+        onSelect = onSelect,
+        labels = { if (it == Direction.EXPORT) "Türkiye'den çıkış" else "Türkiye'ye giriş" },
+    )
+}
+
+@Composable
+private fun Header(showMap: Boolean, onToggle: () -> Unit, compact: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
+    Row(Modifier.padding(bottom = if (compact) 0.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Sınır Kapıları",
+                style = if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
+                color = colors.onBackground,
+            )
+            if (!compact) {
+                Text("Tır yoğunluğu ve tahmini bekleme", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            }
+        }
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(if (compact) colors.surfaceVariant else colors.surface).clickable(onClick = onToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (showMap) Icons.AutoMirrored.Rounded.List else Icons.Rounded.Map,
+                contentDescription = if (showMap) "Liste" else "Harita",
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
