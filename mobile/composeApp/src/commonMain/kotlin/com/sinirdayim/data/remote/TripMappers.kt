@@ -23,14 +23,29 @@ fun TripRequest.toDto() = PlanRequestDto(
     origin = GeoPointDto(origin.lat, origin.lng),
     destination = GeoPointDto(destination.lat, destination.lng),
     departAt = departAt.toString(),
-    driver = DriverDto(driver.continuousDrivingMin, driver.dailyDrivingMin, driver.extendedDaysLeft),
+    driver = DriverDto(
+        continuousDrivingMin = driver.continuousDrivingMin,
+        splitBreakTaken = driver.splitBreakTaken,
+        dailyDrivingMin = driver.dailyDrivingMin,
+        extendedDaysLeft = driver.extendedDaysLeft,
+        reducedRestsLeft = driver.reducedRestsLeft,
+        weeklyDrivingMin = driver.weeklyDrivingMin,
+        prevWeekDrivingMin = driver.prevWeekDrivingMin,
+    ),
 )
 
 fun TripPlanDto.toDomain() = TripPlan(
     distanceKm = distanceKm,
     departure = Instant.parse(departure),
     arrival = Instant.parse(arrival),
-    totals = TripTotals(totals.drivingMin, totals.breakMin, totals.dailyRestMin, totals.borderWaitMin, totals.totalMin),
+    totals = TripTotals(
+        drivingMin = totals.drivingMin,
+        breakMin = totals.breakMin,
+        dailyRestMin = totals.dailyRestMin,
+        weeklyRestMin = totals.weeklyRestMin,
+        borderWaitMin = totals.borderWaitMin,
+        totalMin = totals.totalMin,
+    ),
     crossings = crossings.map {
         val est = it.estimate.toDomain()
         TripCrossing(it.id, it.name, GeoPoint(it.location.lat, it.location.lng), it.from, it.to, it.atKm, est.waitMinutes, est.level)
@@ -43,14 +58,17 @@ fun TripPlanDto.toDomain() = TripPlan(
     route = decodePolyline(polyline),
 )
 
+private fun stepKind(value: String?): StepKind? = when (value) {
+    "drive" -> StepKind.DRIVE
+    "break" -> StepKind.BREAK
+    "daily_rest" -> StepKind.DAILY_REST
+    "weekly_rest" -> StepKind.WEEKLY_REST
+    "border_wait" -> StepKind.BORDER_WAIT
+    else -> null
+}
+
 private fun TripStepDto.toDomainOrNull(): TripStep? {
-    val kind = when (kind) {
-        "drive" -> StepKind.DRIVE
-        "break" -> StepKind.BREAK
-        "daily_rest" -> StepKind.DAILY_REST
-        "border_wait" -> StepKind.BORDER_WAIT
-        else -> return null
-    }
+    val kind = stepKind(kind) ?: return null
     return TripStep(
         kind = kind,
         start = Instant.parse(start),
@@ -63,10 +81,14 @@ private fun TripStepDto.toDomainOrNull(): TripStep? {
             "continuous_driving_limit" -> StopReason.CONTINUOUS_DRIVING
             "daily_driving_limit" -> StopReason.DAILY_DRIVING
             "duty_period_limit" -> StopReason.DUTY_PERIOD
+            "weekly_driving_limit" -> StopReason.WEEKLY_DRIVING
+            "weekly_rest_due" -> StopReason.WEEKLY_REST_DUE
             else -> null
         },
         crossingId = crossingId,
         restArea = restArea?.toDomain(),
+        reduced = reduced,
+        countsAs = stepKind(countsAs),
     )
 }
 

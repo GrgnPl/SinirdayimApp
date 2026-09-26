@@ -2,19 +2,24 @@
 // EU 561/2006 / AETR driving time rules. It is pure logic: no I/O, no clock.
 //
 // Rules applied:
-//   - After 4h30 of driving, a 45 min break (no split 15+30 yet).
-//   - Daily driving max 9h, or 10h on up to two days per week.
-//   - Daily rest of 11h, which must start within 13h of the end of the
-//     previous daily rest (24h period).
-//   - Waiting at a border with the engine off counts as a break when it lasts
-//     45 min or more, and as a daily rest when it lasts 11h or more.
+//   - After 4h30 of driving, a 45 min break. It may be split into 15 + 30 min:
+//     once a 15 min part is taken, the next break only needs 30 min.
+//   - Daily driving max 9h, or 10h on up to two days per calendar week.
+//   - Daily rest of 11h, reduced to 9h up to three times between weekly
+//     rests. It must start within 24h minus the rest length (13h / 15h) of
+//     the end of the previous daily rest.
+//   - Weekly driving max 56h per calendar week (Monday 00:00) and 90h over
+//     two consecutive weeks; weekly rest of 45h when a weekly limit is hit or
+//     six 24h periods have passed since the last weekly rest.
+//   - Waiting at a border with the engine off counts as rest: 15 min as the
+//     first part of a split break, a full break, and 9h / 11h as a daily rest.
 //
 // Stops are placed as late as the rules allow. With a StopFinder, a stop is
 // pulled back to the last suitable place (rest area, truck parking) within a
 // search window before the limit.
 //
-// Not yet modeled: reduced daily rest (9h), split breaks, weekly limits
-// (56h / 90h) and weekly rest.
+// Not modeled: split daily rest (3h + 9h), reduced weekly rest (24h) and its
+// compensation, ferry/train interruptions.
 package tacho
 
 import (
@@ -26,14 +31,23 @@ import (
 const (
 	MaxContinuousDriving = 4*time.Hour + 30*time.Minute
 	BreakDuration        = 45 * time.Minute
+	SplitBreakFirst      = 15 * time.Minute
+	SplitBreakSecond     = 30 * time.Minute
 	MaxDailyDriving      = 9 * time.Hour
 	ExtendedDailyDriving = 10 * time.Hour
 	DailyRestDuration    = 11 * time.Hour
+	ReducedDailyRest     = 9 * time.Hour
 	MaxDutyPeriod        = 24*time.Hour - DailyRestDuration // 13h
+	MaxReducedRests      = 3
+	MaxExtendedDays      = 2
+	MaxWeeklyDriving     = 56 * time.Hour
+	MaxBiweeklyDriving   = 90 * time.Hour
+	WeeklyRestDuration   = 45 * time.Hour
+	MaxBetweenWeeklyRest = 6 * 24 * time.Hour
 
 	// How much driving before a limit a stop may be pulled back to reach a
-	// proper place. Daily rests deserve a longer search: a safe spot for the
-	// night matters more than a few extra kilometres.
+	// proper place. Rests deserve a longer search: a safe spot for the night
+	// matters more than a few extra kilometres.
 	BreakSearchWindow = 45 * time.Minute
 	RestSearchWindow  = 2 * time.Hour
 )
@@ -53,6 +67,7 @@ const (
 	KindBorderWait Kind = "border_wait"
 	KindBreak      Kind = "break"
 	KindDailyRest  Kind = "daily_rest"
+	KindWeeklyRest Kind = "weekly_rest"
 )
 
 // Activity is one piece of the trip as it would happen without any rules:
@@ -64,12 +79,19 @@ type Activity struct {
 	Ref        string  // e.g. crossing id for border waits
 }
 
-// DriverState is the driver's tachograph state at departure.
+// DriverState is the driver's tachograph state at departure. The zero value
+// is a rested driver at the start of a week with no reduced rests or
+// extended days available; callers set what the driver actually has.
 type DriverState struct {
 	ContinuousDriving time.Duration // driving since the last qualifying break
+	SplitBreakTaken   bool          // a 15 min first part was taken since then
 	DailyDriving      time.Duration // driving since the last daily rest
 	DutyStartedAt     time.Time     // end of the last daily rest; zero = departure time
 	ExtendedDaysLeft  int           // 10h days still available this week (0-2)
+	ReducedRestsLeft  int           // 9h daily rests still available (0-3)
+	WeeklyDriving     time.Duration // driving in the current calendar week
+	PrevWeekDriving   time.Duration // driving in the previous calendar week
+	LastWeeklyRestEnd time.Time     // zero = not tracked
 }
 
 // Step is one entry of the planned timeline.
@@ -81,6 +103,10 @@ type Step struct {
 	ToKm     float64       `json:"toKm"`
 	Ref      string        `json:"ref,omitempty"`
 	Reason   string        `json:"reason,omitempty"` // why a break/rest was inserted
+	// Reduced marks a 9h daily rest, or a 30 min second part of a split break.
+	Reduced bool `json:"reduced,omitempty"`
+	// CountsAs tells what rule a border wait satisfied (break, daily rest...).
+	CountsAs Kind `json:"countsAs,omitempty"`
 }
 
 // Plan is the scheduled trip.
@@ -91,6 +117,7 @@ type Plan struct {
 	Driving     time.Duration
 	Breaks      time.Duration
 	DailyRests  time.Duration
+	WeeklyRests time.Duration
 	BorderWaits time.Duration
 }
 
@@ -98,32 +125,41 @@ type Plan struct {
 const (
 	ReasonContinuous = "continuous_driving_limit" // 4h30 reached
 	ReasonDaily      = "daily_driving_limit"      // 9h / 10h reached
-	ReasonDuty       = "duty_period_limit"        // 13h since last daily rest
+	ReasonDuty       = "duty_period_limit"        // 13h / 15h since last daily rest
+	ReasonWeekly     = "weekly_driving_limit"     // 56h / 90h reached
+	ReasonWeeklyDue  = "weekly_rest_due"          // six 24h periods since last weekly rest
 )
 
 var ErrInvalidState = errors.New("tacho: invalid driver state")
 
-// Schedule walks the activities and inserts breaks and daily rests as late as
-// the rules allow, at arbitrary points on the road.
+// Schedule walks the activities and inserts breaks and rests as late as the
+// rules allow, at arbitrary points on the road.
 func Schedule(activities []Activity, depart time.Time, st DriverState) (Plan, error) {
 	return ScheduleWith(activities, depart, st, nil)
 }
 
 // ScheduleWith is Schedule with stops snapped to places chosen by finder.
 func ScheduleWith(activities []Activity, depart time.Time, st DriverState, finder StopFinder) (Plan, error) {
-	if st.ContinuousDriving < 0 || st.DailyDriving < 0 || st.ExtendedDaysLeft < 0 ||
-		st.ContinuousDriving > MaxContinuousDriving || st.DailyDriving > ExtendedDailyDriving {
+	if !valid(st) {
 		return Plan{}, ErrInvalidState
 	}
 	s := &scheduler{
 		now:          depart,
 		cont:         st.ContinuousDriving,
+		splitTaken:   st.SplitBreakTaken,
 		daily:        st.DailyDriving,
 		dutyStart:    st.DutyStartedAt,
 		extendedLeft: st.ExtendedDaysLeft,
+		reducedLeft:  st.ReducedRestsLeft,
+		weekly:       st.WeeklyDriving,
+		prevWeek:     st.PrevWeekDriving,
+		nextWeek:     nextMonday(depart),
 		finder:       finder,
 		track:        newTrack(activities),
 		plan:         Plan{Departure: depart},
+	}
+	if !st.LastWeeklyRestEnd.IsZero() {
+		s.weeklyRestDue = st.LastWeeklyRestEnd.Add(MaxBetweenWeeklyRest)
 	}
 	if s.dutyStart.IsZero() || s.dutyStart.After(depart) {
 		s.dutyStart = depart
@@ -147,17 +183,32 @@ func ScheduleWith(activities []Activity, depart time.Time, st DriverState, finde
 	return s.plan, nil
 }
 
+func valid(st DriverState) bool {
+	return st.ContinuousDriving >= 0 && st.ContinuousDriving <= MaxContinuousDriving &&
+		st.DailyDriving >= 0 && st.DailyDriving <= ExtendedDailyDriving &&
+		st.ExtendedDaysLeft >= 0 && st.ExtendedDaysLeft <= MaxExtendedDays &&
+		st.ReducedRestsLeft >= 0 && st.ReducedRestsLeft <= MaxReducedRests &&
+		st.WeeklyDriving >= 0 && st.WeeklyDriving <= MaxWeeklyDriving &&
+		st.PrevWeekDriving >= 0 && st.PrevWeekDriving <= MaxWeeklyDriving
+}
+
 type scheduler struct {
-	now          time.Time
-	pos          time.Duration // driving time done along the route
-	cont         time.Duration
-	daily        time.Duration
-	dailyLimit   time.Duration
-	dutyStart    time.Time
-	extendedLeft int
-	finder       StopFinder
-	track        track
-	plan         Plan
+	now           time.Time
+	pos           time.Duration // driving time done along the route
+	cont          time.Duration
+	splitTaken    bool
+	daily         time.Duration
+	dailyLimit    time.Duration
+	dutyStart     time.Time
+	extendedLeft  int
+	reducedLeft   int
+	weekly        time.Duration
+	prevWeek      time.Duration
+	nextWeek      time.Time // start of the next calendar week
+	weeklyRestDue time.Time // zero = not tracked
+	finder        StopFinder
+	track         track
+	plan          Plan
 }
 
 // pickDailyLimit uses an extended (10h) day when one is left.
@@ -168,17 +219,43 @@ func (s *scheduler) pickDailyLimit() time.Duration {
 	return MaxDailyDriving
 }
 
+// dailyRest is the rest the driver will take at the end of the current day:
+// reduced while reductions are left, which also widens the duty window.
+func (s *scheduler) dailyRest() (time.Duration, bool) {
+	if s.reducedLeft > 0 {
+		return ReducedDailyRest, true
+	}
+	return DailyRestDuration, false
+}
+
+func (s *scheduler) breakNeeded() time.Duration {
+	if s.splitTaken {
+		return SplitBreakSecond
+	}
+	return BreakDuration
+}
+
 // driveUntil drives to route driving time end, stopping whenever a limit
 // is reached.
 func (s *scheduler) driveUntil(end time.Duration) {
 	for s.pos < end {
+		rest, _ := s.dailyRest()
 		contLeft := MaxContinuousDriving - s.cont
 		dailyLeft := s.dailyLimit - s.daily
-		dutyLeft := s.dutyStart.Add(MaxDutyPeriod).Sub(s.now)
-		budget := min(contLeft, dailyLeft, dutyLeft)
+		dutyLeft := s.dutyStart.Add(24*time.Hour - rest).Sub(s.now)
+		weekLeft := s.weekLeft()
+		dueLeft := time.Duration(1<<62 - 1)
+		if !s.weeklyRestDue.IsZero() {
+			dueLeft = s.weeklyRestDue.Sub(s.now)
+		}
+		budget := min(contLeft, dailyLeft, dutyLeft, weekLeft, dueLeft)
 
 		kind, reason := KindBreak, ReasonContinuous
 		switch budget {
+		case weekLeft:
+			kind, reason = KindWeeklyRest, ReasonWeekly
+		case dueLeft:
+			kind, reason = KindWeeklyRest, ReasonWeeklyDue
 		case dailyLeft:
 			kind, reason = KindDailyRest, ReasonDaily
 		case dutyLeft:
@@ -202,12 +279,12 @@ func (s *scheduler) driveUntil(end time.Duration) {
 		if kind == KindBreak && s.finder != nil && dayLeft-contLeft < RestSearchWindow {
 			from := s.track.kmAt(max(s.pos, target-RestSearchWindow))
 			if km, r, ok := s.finder.Find(KindDailyRest, from, s.track.kmAt(target)); ok {
-				rest := ReasonDaily
+				why := ReasonDaily
 				if dutyLeft < dailyLeft {
-					rest = ReasonDuty
+					why = ReasonDuty
 				}
 				s.advance(min(max(s.track.timeAt(km), s.pos), target))
-				s.stop(KindDailyRest, rest, r)
+				s.stop(KindDailyRest, why, r)
 				continue
 			}
 		}
@@ -215,18 +292,35 @@ func (s *scheduler) driveUntil(end time.Duration) {
 		stopAt, ref := target, ""
 		if s.finder != nil {
 			window := BreakSearchWindow
-			if kind == KindDailyRest {
+			if kind != KindBreak {
 				window = RestSearchWindow
+			}
+			// Rest areas suitable for a daily rest also suit a weekly one.
+			findKind := kind
+			if kind == KindWeeklyRest {
+				findKind = KindDailyRest
 			}
 			from := s.track.kmAt(max(s.pos, target-window))
 			to := s.track.kmAt(target)
-			if km, r, ok := s.finder.Find(kind, from, to); ok && km >= from && km <= to {
+			if km, r, ok := s.finder.Find(findKind, from, to); ok && km >= from && km <= to {
 				stopAt, ref = min(max(s.track.timeAt(km), s.pos), target), r
 			}
 		}
 		s.advance(stopAt)
 		s.stop(kind, reason, ref)
 	}
+}
+
+// weekLeft is how long the driver may still drive under the weekly limits,
+// counting the fresh allowance of the next calendar week if it starts first.
+func (s *scheduler) weekLeft() time.Duration {
+	left := min(MaxWeeklyDriving-s.weekly, MaxBiweeklyDriving-s.prevWeek-s.weekly)
+	untilRoll := s.nextWeek.Sub(s.now)
+	if left <= untilRoll {
+		return left
+	}
+	thisWeek := s.weekly + untilRoll
+	return untilRoll + min(MaxWeeklyDriving, MaxBiweeklyDriving-thisWeek)
 }
 
 // advance drives from the current position to route driving time t.
@@ -244,6 +338,15 @@ func (s *scheduler) advance(t time.Duration) {
 	} else {
 		s.plan.Steps = append(s.plan.Steps, Step{Kind: KindDrive, Start: s.now, Duration: d, FromKm: from, ToKm: to})
 	}
+	// Weekly driving counts per calendar week; split at the boundary.
+	if end := s.now.Add(d); !end.Before(s.nextWeek) {
+		before := s.nextWeek.Sub(s.now)
+		s.weekly += before
+		s.rollWeek()
+		s.weekly += d - before
+	} else {
+		s.weekly += d
+	}
 	s.now = s.now.Add(d)
 	s.pos = t
 	s.cont += d
@@ -251,31 +354,72 @@ func (s *scheduler) advance(t time.Duration) {
 	s.plan.Driving += d
 }
 
+// rollWeek moves to the next calendar week. Extended days are per week.
+func (s *scheduler) rollWeek() {
+	s.prevWeek = s.weekly
+	s.weekly = 0
+	s.extendedLeft = MaxExtendedDays
+	s.nextWeek = s.nextWeek.AddDate(0, 0, 7)
+}
+
+// passTime lets time pass without driving, rolling calendar weeks.
+func (s *scheduler) passTime(d time.Duration) {
+	s.now = s.now.Add(d)
+	for !s.now.Before(s.nextWeek) {
+		s.rollWeek()
+	}
+}
+
 func (s *scheduler) stop(kind Kind, reason, ref string) {
 	km := s.track.kmAt(s.pos)
-	d := BreakDuration
-	if kind == KindDailyRest {
-		d = DailyRestDuration
+	step := Step{Kind: kind, Start: s.now, FromKm: km, ToKm: km, Reason: reason, Ref: ref}
+	switch kind {
+	case KindBreak:
+		step.Duration = s.breakNeeded()
+		step.Reduced = s.splitTaken
+		s.plan.Breaks += step.Duration
+		s.cont, s.splitTaken = 0, false
+	case KindDailyRest:
+		step.Duration, step.Reduced = s.dailyRest()
+		s.plan.DailyRests += step.Duration
+	case KindWeeklyRest:
+		step.Duration = WeeklyRestDuration
+		// A weekly driving limit only lifts when the next calendar week
+		// starts, so the rest lasts at least until then.
+		if reason == ReasonWeekly {
+			step.Duration = max(step.Duration, s.nextWeek.Sub(s.now))
+		}
+		s.plan.WeeklyRests += step.Duration
 	}
-	s.plan.Steps = append(s.plan.Steps, Step{Kind: kind, Start: s.now, Duration: d, FromKm: km, ToKm: km, Reason: reason, Ref: ref})
-	s.now = s.now.Add(d)
-	if kind == KindDailyRest {
-		s.plan.DailyRests += d
+	s.plan.Steps = append(s.plan.Steps, step)
+	s.passTime(step.Duration)
+	switch kind {
+	case KindDailyRest:
+		if step.Reduced {
+			s.reducedLeft--
+		}
 		s.resetDay()
-	} else {
-		s.plan.Breaks += d
-		s.cont = 0
+	case KindWeeklyRest:
+		s.resetWeekRest()
 	}
 }
 
 func (s *scheduler) resetDay() {
 	if s.dailyLimit == ExtendedDailyDriving && s.daily > MaxDailyDriving {
-		s.extendedLeft--
+		s.extendedLeft = max(s.extendedLeft-1, 0)
 	}
-	s.cont = 0
+	s.cont, s.splitTaken = 0, false
 	s.daily = 0
 	s.dutyStart = s.now
 	s.dailyLimit = s.pickDailyLimit()
+}
+
+// resetWeekRest applies a weekly rest: a new day, reductions restored and
+// the next weekly rest due in six 24h periods.
+func (s *scheduler) resetWeekRest() {
+	s.resetDay()
+	s.reducedLeft = MaxReducedRests
+	s.weeklyRestDue = s.now.Add(MaxBetweenWeeklyRest)
 }
 
 func (s *scheduler) wait(a Activity) {
@@ -283,15 +427,44 @@ func (s *scheduler) wait(a Activity) {
 		return
 	}
 	km := s.track.kmAt(s.pos)
-	s.plan.Steps = append(s.plan.Steps, Step{Kind: KindBorderWait, Start: s.now, Duration: a.Duration, FromKm: km, ToKm: km, Ref: a.Ref})
-	s.now = s.now.Add(a.Duration)
+	step := Step{Kind: KindBorderWait, Start: s.now, Duration: a.Duration, FromKm: km, ToKm: km, Ref: a.Ref}
 	s.plan.BorderWaits += a.Duration
+
+	// Engine off in the queue: the wait counts as the longest rest it covers.
+	restDur, reduced := s.dailyRest()
 	switch {
 	case a.Duration >= DailyRestDuration:
-		s.resetDay()
-	case a.Duration >= BreakDuration:
-		s.cont = 0
+		step.CountsAs = KindDailyRest
+		reduced = false
+	case reduced && a.Duration >= restDur:
+		step.CountsAs = KindDailyRest
+	case a.Duration >= s.breakNeeded():
+		step.CountsAs = KindBreak
+	case a.Duration >= SplitBreakFirst && !s.splitTaken:
+		s.splitTaken = true
 	}
+	s.plan.Steps = append(s.plan.Steps, step)
+	s.passTime(a.Duration)
+	switch step.CountsAs {
+	case KindDailyRest:
+		if reduced {
+			s.reducedLeft--
+		}
+		s.resetDay()
+	case KindBreak:
+		s.cont, s.splitTaken = 0, false
+	}
+}
+
+// nextMonday is the start of the calendar week after t, in t's location.
+func nextMonday(t time.Time) time.Time {
+	y, m, d := t.Date()
+	day := time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+	offset := (int(time.Monday) - int(day.Weekday()) + 7) % 7
+	if offset == 0 {
+		offset = 7
+	}
+	return day.AddDate(0, 0, offset)
 }
 
 // track maps driving time along the route to distance and back, as a

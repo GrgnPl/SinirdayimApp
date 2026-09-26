@@ -14,11 +14,16 @@ class PlanTripUseCase(private val repository: TripRepository) {
     suspend operator fun invoke(request: TripRequest): TripPlan {
         require(request.driver.continuousDrivingMin in 0..MAX_CONTINUOUS_MIN) { "continuous driving out of range" }
         require(request.driver.dailyDrivingMin in 0..MAX_DAILY_MIN) { "daily driving out of range" }
+        require(request.driver.reducedRestsLeft in 0..MAX_REDUCED_RESTS) { "reduced rests out of range" }
+        require(request.driver.weeklyDrivingMin in 0..MAX_WEEKLY_MIN) { "weekly driving out of range" }
+        require(request.driver.prevWeekDrivingMin in 0..MAX_WEEKLY_MIN) { "previous week driving out of range" }
         return repository.plan(request)
     }
 
     companion object {
         const val MAX_CONTINUOUS_MIN = 270 // 4h30
         const val MAX_DAILY_MIN = 600 // 10h
+        const val MAX_WEEKLY_MIN = 56 * 60
+        const val MAX_REDUCED_RESTS = 3
     }
 }

@@ -19,9 +19,14 @@ type planRequest struct {
 	DepartAt    *time.Time       `json:"departAt"`
 	Driver      struct {
 		ContinuousDrivingMin int        `json:"continuousDrivingMin"`
+		SplitBreakTaken      bool       `json:"splitBreakTaken"`
 		DailyDrivingMin      int        `json:"dailyDrivingMin"`
 		DutyStartedAt        *time.Time `json:"dutyStartedAt"`
 		ExtendedDaysLeft     *int       `json:"extendedDaysLeft"`
+		ReducedRestsLeft     int        `json:"reducedRestsLeft"`
+		WeeklyDrivingMin     int        `json:"weeklyDrivingMin"`
+		PrevWeekDrivingMin   int        `json:"prevWeekDrivingMin"`
+		LastWeeklyRestEnd    *time.Time `json:"lastWeeklyRestEnd"`
 	} `json:"driver"`
 }
 
@@ -42,8 +47,12 @@ func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
 		DepartAt:    time.Now().Truncate(time.Minute),
 		Driver: tacho.DriverState{
 			ContinuousDriving: time.Duration(req.Driver.ContinuousDrivingMin) * time.Minute,
+			SplitBreakTaken:   req.Driver.SplitBreakTaken,
 			DailyDriving:      time.Duration(req.Driver.DailyDrivingMin) * time.Minute,
 			ExtendedDaysLeft:  2,
+			ReducedRestsLeft:  req.Driver.ReducedRestsLeft,
+			WeeklyDriving:     time.Duration(req.Driver.WeeklyDrivingMin) * time.Minute,
+			PrevWeekDriving:   time.Duration(req.Driver.PrevWeekDrivingMin) * time.Minute,
 		},
 	}
 	if req.DepartAt != nil {
@@ -55,6 +64,9 @@ func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
 		// Without an explicit start, assume the duty period began when
 		// today's driving began: the most conservative guess we can make.
 		in.Driver.DutyStartedAt = in.DepartAt.Add(-in.Driver.DailyDriving)
+	}
+	if req.Driver.LastWeeklyRestEnd != nil {
+		in.Driver.LastWeeklyRestEnd = *req.Driver.LastWeeklyRestEnd
 	}
 	if req.Driver.ExtendedDaysLeft != nil {
 		in.Driver.ExtendedDaysLeft = *req.Driver.ExtendedDaysLeft

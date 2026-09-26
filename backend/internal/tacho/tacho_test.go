@@ -203,3 +203,112 @@ func TestDayEndsEarlyAtGoodPlaceInsteadOfLateBreak(t *testing.T) {
 		t.Fatalf("rest = %+v, want daily rest at km 500", rest)
 	}
 }
+
+func stepsOf(p Plan, k Kind) []Step {
+	var out []Step
+	for _, s := range p.Steps {
+		if s.Kind == k {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func TestSplitBreakSecondPartIsThirtyMinutes(t *testing.T) {
+	p, _ := Schedule([]Activity{drive(6, 60)}, depart, DriverState{SplitBreakTaken: true})
+	br := stepsOf(p, KindBreak)
+	if len(br) != 1 || br[0].Duration != SplitBreakSecond || !br[0].Reduced {
+		t.Fatalf("breaks = %+v, want one 30 min second part", br)
+	}
+}
+
+func TestShortBorderWaitIsFirstPartOfSplitBreak(t *testing.T) {
+	acts := []Activity{drive(2, 60), {Kind: KindBorderWait, Duration: 20 * time.Minute, Ref: "x"}, drive(4, 60)}
+	p, _ := Schedule(acts, depart, DriverState{})
+	br := stepsOf(p, KindBreak)
+	if len(br) != 1 || br[0].Duration != SplitBreakSecond {
+		t.Fatalf("breaks = %+v, want a 30 min second part after the 20 min wait", br)
+	}
+	// 20 min does not reset continuous driving: break still after 4h30 of driving.
+	if br[0].FromKm != 270 {
+		t.Errorf("break at km %v, want 270", br[0].FromKm)
+	}
+}
+
+func TestReducedDailyRestUsedWhileAvailable(t *testing.T) {
+	p, _ := Schedule([]Activity{drive(24, 60)}, depart, DriverState{ReducedRestsLeft: 1})
+	rests := stepsOf(p, KindDailyRest)
+	if len(rests) != 2 {
+		t.Fatalf("rests = %+v, want 2", rests)
+	}
+	if rests[0].Duration != ReducedDailyRest || !rests[0].Reduced {
+		t.Errorf("first rest = %+v, want 9h reduced", rests[0])
+	}
+	if rests[1].Duration != DailyRestDuration || rests[1].Reduced {
+		t.Errorf("second rest = %+v, want regular 11h", rests[1])
+	}
+}
+
+func TestBorderWaitCountsAsReducedRest(t *testing.T) {
+	acts := []Activity{drive(4, 60), {Kind: KindBorderWait, Duration: 10 * time.Hour, Ref: "x"}, drive(8, 60)}
+	p, _ := Schedule(acts, depart, DriverState{ReducedRestsLeft: 1})
+	if w := stepsOf(p, KindBorderWait)[0]; w.CountsAs != KindDailyRest {
+		t.Fatalf("wait counts as %q, want daily rest", w.CountsAs)
+	}
+	if n := len(stepsOf(p, KindDailyRest)); n != 0 {
+		t.Errorf("got %d extra daily rests, want none", n)
+	}
+	// Without a reduction left, 10h is not a daily rest: only a break.
+	p, _ = Schedule(acts, depart, DriverState{})
+	if w := stepsOf(p, KindBorderWait)[0]; w.CountsAs != KindBreak {
+		t.Errorf("wait counts as %q, want break", w.CountsAs)
+	}
+}
+
+func TestWeeklyDrivingLimitForcesWeeklyRest(t *testing.T) {
+	p, _ := Schedule([]Activity{drive(3, 60)}, depart, DriverState{WeeklyDriving: 55 * time.Hour})
+	eqKinds(t, kinds(p), KindDrive, KindWeeklyRest, KindDrive)
+	// Monday 07:00: the limit lifts next Monday, so the rest lasts until then.
+	w := p.Steps[1]
+	nextWeek := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	if w.Reason != ReasonWeekly || w.FromKm != 60 || !w.Start.Add(w.Duration).Equal(nextWeek) {
+		t.Fatalf("weekly rest = %+v, want until %v", w, nextWeek)
+	}
+}
+
+func TestBiweeklyLimit(t *testing.T) {
+	st := DriverState{WeeklyDriving: 40 * time.Hour, PrevWeekDriving: 49 * time.Hour}
+	p, _ := Schedule([]Activity{drive(3, 60)}, depart, st)
+	if w := stepsOf(p, KindWeeklyRest); len(w) != 1 || w[0].FromKm != 60 {
+		t.Fatalf("weekly rest = %+v, want after 1h (90h over two weeks)", w)
+	}
+}
+
+func TestNewCalendarWeekResetsWeeklyDriving(t *testing.T) {
+	sunday := time.Date(2026, 9, 27, 23, 30, 0, 0, time.UTC)
+	p, _ := Schedule([]Activity{drive(3, 60)}, sunday, DriverState{WeeklyDriving: 55 * time.Hour})
+	if w := stepsOf(p, KindWeeklyRest); len(w) != 0 {
+		t.Fatalf("weekly rest = %+v, want none: the week ends after 30 min", w)
+	}
+}
+
+func TestWeeklyRestDueAfterSixDays(t *testing.T) {
+	st := DriverState{LastWeeklyRestEnd: depart.Add(-MaxBetweenWeeklyRest + time.Hour)}
+	p, _ := Schedule([]Activity{drive(3, 60)}, depart, st)
+	w := stepsOf(p, KindWeeklyRest)
+	if len(w) != 1 || w[0].Reason != ReasonWeeklyDue || w[0].FromKm != 60 {
+		t.Fatalf("weekly rest = %+v, want due after 1h", w)
+	}
+}
+
+func TestInvalidStates(t *testing.T) {
+	for _, st := range []DriverState{
+		{ReducedRestsLeft: 4},
+		{ExtendedDaysLeft: 3},
+		{WeeklyDriving: 57 * time.Hour},
+	} {
+		if _, err := Schedule(nil, depart, st); err == nil {
+			t.Errorf("state %+v: expected error", st)
+		}
+	}
+}

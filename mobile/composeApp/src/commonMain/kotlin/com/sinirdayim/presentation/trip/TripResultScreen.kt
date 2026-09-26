@@ -98,15 +98,18 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
             StatTile("Mola", formatDuration(plan.totals.breakMin), Modifier.weight(1f))
             StatTile("Günlük dinlenme", formatDuration(plan.totals.dailyRestMin), Modifier.weight(1f))
         }
+        if (plan.totals.weeklyRestMin > 0) {
+            StatTile("Haftalık dinlenme", formatDuration(plan.totals.weeklyRestMin), Modifier.fillMaxWidth())
+        }
 
         if (plan.alternatives.size > 1) Alternatives(plan.alternatives)
 
         Timeline(plan)
 
         Text(
-            "Plan AB 561/2006 ve AETR kurallarına göre hesaplandı: 4,5 saatte 45 dk mola, günde en fazla 9 saat " +
-                "(haftada 2 gün 10 saat) sürüş, 11 saat günlük dinlenme. Sınırda 45 dk üzeri bekleme mola, " +
-                "11 saat üzeri bekleme günlük dinlenme sayılır.",
+            "Plan AB 561/2006 ve AETR kurallarına göre hesaplandı: 4,5 saatte 45 dk (veya 15+30) mola, " +
+                "günde en fazla 9 saat (haftada 2 gün 10 saat) sürüş, 11 saat (hak varsa 9 saat) günlük dinlenme, " +
+                "haftada 56, iki haftada 90 saat sürüş. Sınırdaki bekleme, süresine göre mola veya dinlenme sayılır.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.onSurfaceVariant,
         )
@@ -235,7 +238,7 @@ private fun stepIcon(kind: StepKind): Pair<ImageVector, Color> {
     return when (kind) {
         StepKind.DRIVE -> Icons.Rounded.LocalShipping to MaterialTheme.colorScheme.onSurface
         StepKind.BREAK -> Icons.Rounded.LocalCafe to levels.medium
-        StepKind.DAILY_REST -> Icons.Rounded.Hotel to RestColor
+        StepKind.DAILY_REST, StepKind.WEEKLY_REST -> Icons.Rounded.Hotel to RestColor
         StepKind.BORDER_WAIT -> Icons.Rounded.Flag to levels.high
     }
 }
@@ -244,24 +247,35 @@ private fun stepTitle(step: TripStep, crossingNames: Map<String, String>): Strin
     StepKind.DRIVE -> "Sürüş · ${formatDuration(step.durationMin)}"
     StepKind.BREAK -> "${step.durationMin} dk mola" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
     StepKind.DAILY_REST -> "${formatDuration(step.durationMin)} dinlenme" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
+    StepKind.WEEKLY_REST -> "Haftalık dinlenme · ${formatDuration(step.durationMin)}" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
     StepKind.BORDER_WAIT -> "${crossingNames[step.crossingId] ?: "Sınır"} · ${formatDuration(step.durationMin)} bekleme"
 }
 
 private fun stepSubtitle(step: TripStep): String = when (step.kind) {
     StepKind.DRIVE -> "km ${step.fromKm.roundToInt()} → ${step.toKm.roundToInt()} · ${(step.toKm - step.fromKm).roundToInt()} km"
-    StepKind.BREAK, StepKind.DAILY_REST -> listOfNotNull(
+    StepKind.BREAK, StepKind.DAILY_REST, StepKind.WEEKLY_REST -> listOfNotNull(
         "km ${step.fromKm.roundToInt()}",
+        when {
+            !step.reduced -> null
+            step.kind == StepKind.BREAK -> "bölünmüş molanın 2. kısmı"
+            else -> "kısaltılmış dinlenme"
+        },
         step.restArea?.facilities()?.takeIf { it.isNotEmpty() },
         if (step.restArea == null) "yol kenarı – yakında tesis bulunamadı" else null,
         when (step.reason) {
             StopReason.CONTINUOUS_DRIVING -> "4,5 saat kesintisiz sürüş"
             StopReason.DAILY_DRIVING -> "günlük sürüş süresi"
-            StopReason.DUTY_PERIOD -> "13 saatlik görev süresi"
+            StopReason.DUTY_PERIOD -> "görev süresi doldu"
+            StopReason.WEEKLY_DRIVING -> "haftalık sürüş limiti (56/90 sa) – yeni haftaya kadar"
+            StopReason.WEEKLY_REST_DUE -> "6 günlük süre doldu"
             null -> null
         },
     ).joinToString(" · ")
-    StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " +
-        if (step.durationMin >= 11 * 60) "günlük dinlenme yerine sayılır" else if (step.durationMin >= 45) "mola yerine sayılır" else "tahmini bekleme"
+    StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " + when (step.countsAs) {
+        StepKind.DAILY_REST -> "günlük dinlenme yerine sayılır"
+        StepKind.BREAK -> "mola yerine sayılır"
+        else -> "tahmini bekleme"
+    }
 }
 
 private fun RestArea.displayName(): String = name ?: when (kind) {

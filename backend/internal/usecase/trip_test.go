@@ -154,3 +154,36 @@ func TestPlanPutsBreakAtRestArea(t *testing.T) {
 		t.Errorf("break location %v should be the rest area's %v", br.Location, br.RestArea.Location)
 	}
 }
+
+func TestSideOfCrossing(t *testing.T) {
+	cat := catalog.NewStatic()
+	get := func(id domain.CrossingID) domain.Crossing {
+		c, err := cat.Get(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	istanbul := domain.GeoPoint{Lat: 41.01, Lng: 28.97}
+	hopaFar := domain.GeoPoint{Lat: 41.39, Lng: 41.42}
+	sofia := domain.GeoPoint{Lat: 42.70, Lng: 23.32}
+	samsun := domain.GeoPoint{Lat: 41.29, Lng: 36.33}
+	tbilisi := domain.GeoPoint{Lat: 41.72, Lng: 44.83}
+
+	cases := []struct {
+		crossing domain.CrossingID
+		a, b     domain.GeoPoint
+		same     bool
+	}{
+		{"tr-bg-hamzabeyli", istanbul, hopaFar, true}, // both in Türkiye, far from the gate
+		{"tr-bg-kapikule", istanbul, sofia, false},
+		{"tr-ge-sarp", samsun, tbilisi, false},
+		{"tr-ge-sarp", samsun, hopaFar, true},
+	}
+	for _, tc := range cases {
+		c := get(tc.crossing)
+		if got := side(c, tc.a) == side(c, tc.b); got != tc.same {
+			t.Errorf("%s: same side = %v, want %v", tc.crossing, got, tc.same)
+		}
+	}
+}

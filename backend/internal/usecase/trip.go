@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -55,7 +56,11 @@ type TripStep struct {
 	ToKm        float64         `json:"toKm"`
 	Location    domain.GeoPoint `json:"location"` // where the step starts
 	Reason      string          `json:"reason,omitempty"`
-	CrossingID  string          `json:"crossingId,omitempty"`
+	// Reduced marks a 9h daily rest or the 30 min second part of a split break.
+	Reduced bool `json:"reduced,omitempty"`
+	// CountsAs tells which rest a border wait satisfied, if any.
+	CountsAs   tacho.Kind `json:"countsAs,omitempty"`
+	CrossingID string     `json:"crossingId,omitempty"`
 	// RestArea is where a break or daily rest is planned, when a suitable
 	// place was found near the limit; otherwise the stop is on the road.
 	RestArea *domain.RestArea `json:"restArea,omitempty"`
@@ -65,6 +70,7 @@ type TripTotals struct {
 	DrivingMin    int `json:"drivingMin"`
 	BreakMin      int `json:"breakMin"`
 	DailyRestMin  int `json:"dailyRestMin"`
+	WeeklyRestMin int `json:"weeklyRestMin"`
 	BorderWaitMin int `json:"borderWaitMin"`
 	TotalMin      int `json:"totalMin"`
 }
@@ -213,9 +219,17 @@ func (s *TripService) candidateCrossings(ctx context.Context, origin, dest domai
 	return out, nil
 }
 
-// side is 0 or 1 depending on which of the crossing's countries p is closer to.
+// side is 0 or 1 depending on which side of the crossing p lies. The border
+// is approximated by the line through the gate perpendicular to the axis
+// from SideRefs[0] to SideRefs[1]; unlike comparing distances to the two
+// reference towns, this stays right for points far from the crossing.
 func side(c domain.Crossing, p domain.GeoPoint) int {
-	if geo.DistanceKm(p, c.SideRefs[0]) <= geo.DistanceKm(p, c.SideRefs[1]) {
+	kx := math.Cos(c.Location.Lat * math.Pi / 180) // shrink longitude like a local map
+	ax := (c.SideRefs[1].Lng - c.SideRefs[0].Lng) * kx
+	ay := c.SideRefs[1].Lat - c.SideRefs[0].Lat
+	px := (p.Lng - c.Location.Lng) * kx
+	py := p.Lat - c.Location.Lat
+	if px*ax+py*ay <= 0 {
 		return 0
 	}
 	return 1
@@ -323,6 +337,7 @@ func assemble(r *routed, sched tacho.Plan, stops *routeStops) TripPlan {
 			DrivingMin:    minutes(sched.Driving),
 			BreakMin:      minutes(sched.Breaks),
 			DailyRestMin:  minutes(sched.DailyRests),
+			WeeklyRestMin: minutes(sched.WeeklyRests),
 			BorderWaitMin: minutes(sched.BorderWaits),
 			TotalMin:      minutes(sched.Arrival.Sub(sched.Departure)),
 		},
@@ -337,6 +352,8 @@ func assemble(r *routed, sched tacho.Plan, stops *routeStops) TripPlan {
 			ToKm:        st.ToKm,
 			Location:    geo.PointAtKm(r.route.Shape, r.cum, st.FromKm),
 			Reason:      st.Reason,
+			Reduced:     st.Reduced,
+			CountsAs:    st.CountsAs,
 		}
 		switch {
 		case st.Kind == tacho.KindBorderWait:
@@ -405,11 +422,11 @@ func (s *TripService) crossingsOnRoute(ctx context.Context, route domain.Route, 
 }
 
 // direction decides which way the route passes a crossing by looking at a
-// point a few km before the gate: if it is closer to side A, the truck goes
-// A → B (export from the crossing's first country).
+// point a few km before the gate: on side A the truck goes A → B (export
+// from the crossing's first country).
 func direction(c domain.Crossing, shape []domain.GeoPoint, cum []float64, idx int) domain.Direction {
 	before := geo.PointAtKm(shape, cum, max(cum[idx]-5, 0))
-	if geo.DistanceKm(before, c.SideRefs[0]) <= geo.DistanceKm(before, c.SideRefs[1]) {
+	if side(c, before) == 0 {
 		return domain.DirectionExport
 	}
 	return domain.DirectionImport

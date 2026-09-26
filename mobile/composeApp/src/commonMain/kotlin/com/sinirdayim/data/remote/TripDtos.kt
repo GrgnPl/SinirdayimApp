@@ -19,8 +19,12 @@ data class PlanRequestDto(
 @Serializable
 data class DriverDto(
     val continuousDrivingMin: Int,
+    val splitBreakTaken: Boolean,
     val dailyDrivingMin: Int,
     val extendedDaysLeft: Int,
+    val reducedRestsLeft: Int,
+    val weeklyDrivingMin: Int,
+    val prevWeekDrivingMin: Int,
 )
 
 @Serializable
@@ -41,6 +45,7 @@ data class TripTotalsDto(
     val drivingMin: Int,
     val breakMin: Int,
     val dailyRestMin: Int,
+    val weeklyRestMin: Int = 0,
     val borderWaitMin: Int,
     val totalMin: Int,
 )
@@ -68,6 +73,8 @@ data class TripStepDto(
     val reason: String? = null,
     val crossingId: String? = null,
     val restArea: RestAreaDto? = null,
+    val reduced: Boolean = false,
+    val countsAs: String? = null,
 )
 
 @Serializable

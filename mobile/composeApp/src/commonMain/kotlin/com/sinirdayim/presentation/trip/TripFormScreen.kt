@@ -22,6 +22,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.SwapVert
@@ -32,9 +34,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinirdayim.domain.model.DriverState
 import com.sinirdayim.domain.model.Place
 import com.sinirdayim.domain.usecase.PlanTripUseCase
 import com.sinirdayim.presentation.util.flagEmoji
@@ -115,6 +122,8 @@ fun TripFormScreen(viewModel: TripViewModel, onPlanned: () -> Unit) {
             }
         }
 
+        MoreDriverState(state.driver, viewModel::onDriver)
+
         state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
 
         Button(
@@ -130,6 +139,66 @@ fun TripFormScreen(viewModel: TripViewModel, onPlanned: () -> Unit) {
                 Text("Rotalar hesaplanıyor…")
             } else {
                 Text("Planla", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
+}
+
+/** Weekly and less common tachograph inputs, collapsed by default to keep the form short. */
+@Composable
+private fun MoreDriverState(d: DriverState, onChange: (DriverState) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(colors.surface)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Diğer takograf bilgileri", style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                Text(
+                    "Haftalık sürüş, 9 saatlik dinlenme, bölünmüş mola",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Icon(
+                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Kapat" else "Aç",
+                tint = colors.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                HorizontalDivider(color = colors.outlineVariant)
+                StepperRow(
+                    label = "Bu hafta toplam sürüş",
+                    value = formatDuration(d.weeklyDrivingMin),
+                    onMinus = { onChange(d.copy(weeklyDrivingMin = (d.weeklyDrivingMin - 30).coerceAtLeast(0))) },
+                    onPlus = { onChange(d.copy(weeklyDrivingMin = (d.weeklyDrivingMin + 30).coerceAtMost(PlanTripUseCase.MAX_WEEKLY_MIN))) },
+                )
+                HorizontalDivider(color = colors.outlineVariant)
+                StepperRow(
+                    label = "Geçen hafta toplam sürüş",
+                    value = formatDuration(d.prevWeekDrivingMin),
+                    onMinus = { onChange(d.copy(prevWeekDrivingMin = (d.prevWeekDrivingMin - 30).coerceAtLeast(0))) },
+                    onPlus = { onChange(d.copy(prevWeekDrivingMin = (d.prevWeekDrivingMin + 30).coerceAtMost(PlanTripUseCase.MAX_WEEKLY_MIN))) },
+                )
+                HorizontalDivider(color = colors.outlineVariant)
+                StepperRow(
+                    label = "Kalan 9 saatlik dinlenme hakkı",
+                    value = d.reducedRestsLeft.toString(),
+                    onMinus = { onChange(d.copy(reducedRestsLeft = (d.reducedRestsLeft - 1).coerceAtLeast(0))) },
+                    onPlus = { onChange(d.copy(reducedRestsLeft = (d.reducedRestsLeft + 1).coerceAtMost(PlanTripUseCase.MAX_REDUCED_RESTS))) },
+                )
+                HorizontalDivider(color = colors.outlineVariant)
+                Row(
+                    Modifier.fillMaxWidth().height(56.dp).clickable { onChange(d.copy(splitBreakTaken = !d.splitBreakTaken)) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("15 dk mola verdim (bölünmüş mola)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Switch(checked = d.splitBreakTaken, onCheckedChange = { onChange(d.copy(splitBreakTaken = it)) })
+                }
             }
         }
     }

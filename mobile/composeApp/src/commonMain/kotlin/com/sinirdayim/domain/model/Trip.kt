@@ -15,8 +15,12 @@ data class Place(
 /** Driver's tachograph state at departure. */
 data class DriverState(
     val continuousDrivingMin: Int = 0,
+    val splitBreakTaken: Boolean = false,
     val dailyDrivingMin: Int = 0,
     val extendedDaysLeft: Int = 2,
+    val reducedRestsLeft: Int = 0,
+    val weeklyDrivingMin: Int = 0,
+    val prevWeekDrivingMin: Int = 0,
 )
 
 data class TripRequest(
@@ -26,9 +30,9 @@ data class TripRequest(
     val driver: DriverState,
 )
 
-enum class StepKind { DRIVE, BREAK, DAILY_REST, BORDER_WAIT }
+enum class StepKind { DRIVE, BREAK, DAILY_REST, WEEKLY_REST, BORDER_WAIT }
 
-enum class StopReason { CONTINUOUS_DRIVING, DAILY_DRIVING, DUTY_PERIOD }
+enum class StopReason { CONTINUOUS_DRIVING, DAILY_DRIVING, DUTY_PERIOD, WEEKLY_DRIVING, WEEKLY_REST_DUE }
 
 enum class RestAreaKind { SERVICES, REST_AREA, TRUCK_PARKING, TRUCK_FUEL }
 
@@ -57,6 +61,10 @@ data class TripStep(
     val reason: StopReason?,
     val crossingId: String?,
     val restArea: RestArea?,
+    /** A 9h daily rest, or the 30 min second part of a split break. */
+    val reduced: Boolean,
+    /** For border waits: the rest the wait counted as, if any. */
+    val countsAs: StepKind?,
 )
 
 data class TripCrossing(
@@ -83,6 +91,7 @@ data class TripTotals(
     val drivingMin: Int,
     val breakMin: Int,
     val dailyRestMin: Int,
+    val weeklyRestMin: Int,
     val borderWaitMin: Int,
     val totalMin: Int,
 )
