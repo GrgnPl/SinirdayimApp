@@ -37,7 +37,28 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/crossings/{id}", h.getCrossing)
 	mux.HandleFunc("POST /v1/trips/plan", h.planTrip)
 	mux.HandleFunc("GET /v1/places", h.searchPlaces)
-	return withCORS(mux)
+	return h.withLogging(withCORS(mux))
+}
+
+// withLogging records every request with its status and duration.
+func (h *Handler) withLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		h.Log.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status,
+			"duration", time.Since(start).Round(time.Millisecond), "remote", r.RemoteAddr)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func (h *Handler) listCrossings(w http.ResponseWriter, r *http.Request) {
