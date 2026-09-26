@@ -248,7 +248,8 @@ private fun stepTitle(step: TripStep, crossingNames: Map<String, String>): Strin
     StepKind.BREAK -> "${step.durationMin} dk mola" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
     StepKind.DAILY_REST -> "${formatDuration(step.durationMin)} dinlenme" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
     StepKind.WEEKLY_REST -> "Haftalık dinlenme · ${formatDuration(step.durationMin)}" + (step.restArea?.let { " · ${it.displayName()}" } ?: "")
-    StepKind.BORDER_WAIT -> "${crossingNames[step.crossingId] ?: "Sınır"} · ${formatDuration(step.durationMin)} bekleme"
+    StepKind.BORDER_WAIT -> (crossingNames[step.crossingId] ?: "Sınır kapısı") +
+        if (step.durationMin == 0) " · bekleme verisi yok" else " · ${formatDuration(step.durationMin)} bekleme"
 }
 
 private fun stepSubtitle(step: TripStep): String = when (step.kind) {
@@ -271,9 +272,10 @@ private fun stepSubtitle(step: TripStep): String = when (step.kind) {
             null -> null
         },
     ).joinToString(" · ")
-    StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " + when (step.countsAs) {
-        StepKind.DAILY_REST -> "günlük dinlenme yerine sayılır"
-        StepKind.BREAK -> "mola yerine sayılır"
+    StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " + when {
+        step.durationMin == 0 -> "süre plana eklenmedi, varış daha geç olabilir"
+        step.countsAs == StepKind.DAILY_REST -> "günlük dinlenme yerine sayılır"
+        step.countsAs == StepKind.BREAK -> "mola yerine sayılır"
         else -> "tahmini bekleme"
     }
 }

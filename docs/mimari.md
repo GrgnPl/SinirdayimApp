@@ -16,6 +16,7 @@ sinir-bekleme/
 │           ├── source/und/       UND scraper
 │           ├── repository/memory bellek içi depo (Postgres adapter'ı gelecek)
 │           ├── routing/valhalla  tır rotası (varsayılan: FOSSGIS public sunucusu)
+│           ├── osm/              Overpass: dinlenme tesisleri ve sınır kontrol noktaları (günlük, disk önbellekli)
 │           ├── geocoding/photon  yer arama
 │           └── httpapi/          JSON REST
 └── mobile/           Kotlin Multiplatform + Compose (Android / iOS)
@@ -50,15 +51,30 @@ Kullanıcı bildirimi, GPS ölçümü, kamera sayımı ve Nakordoni API de aynı
 2. Doğrudan rota + her aday kapıdan "through" noktasıyla rota paralel hesaplanır.
    (Kapı yolları OSM'de tırlar için çoğu zaman "yalnızca varış" etiketli; zorlamadan Valhalla kapıdan geçmiyor.)
 3. Her rotada kapılar geometriden bulunur (≤ 3 km), yön `SideRefs` ile belirlenir, bekleme tahmini eklenir.
-4. `tacho.Schedule` molaları yerleştirir:
-   - 4 sa 30 dk sürüş → 45 dk mola
-   - günlük 9 sa (haftada 2 gün 10 sa) → 11 sa dinlenme
-   - son dinlenmeden 13 sa sonra görev süresi dolar → 11 sa dinlenme
-   - sınırda ≥ 45 dk bekleme mola, ≥ 11 sa bekleme günlük dinlenme sayılır
-5. En erken varan plan seçilir; bekleme verisi eksik planlar geride sıralanır ve işaretlenir.
+4. Katalogda olmayan kapılar OSM `barrier=border_control` noktalarından bulunur ve "bekleme verisi yok"
+   olarak plana eklenir (iki ülkenin noktası birlikte olmalı ya da adı kapı/gümrük/hudut içermeli).
+   Rota kapıya gidip geri dönüyorsa (kapının iki yanı aynı ülkede) o kapı sayılmaz.
+5. `tacho.ScheduleWith` molaları yerleştirir (AB 561/2006, AETR):
+   - 4 sa 30 dk sürüş → 45 dk mola, ya da 15 + 30 bölünmüş
+   - günlük 9 sa (haftada 2 gün 10 sa) sürüş
+   - 11 sa günlük dinlenme; iki haftalık dinlenme arasında 3 kez 9 sa (görev penceresi 13 / 15 sa)
+   - takvim haftasında 56 sa, iki haftada 90 sa sürüş; dolunca yeni haftaya kadar haftalık dinlenme
+   - son haftalık dinlenmeden 6 × 24 sa sonra 45 sa haftalık dinlenme
+   - sınırdaki bekleme kapsadığı en uzun dinlenme sayılır (15 dk bölünmüş molanın ilk kısmı, mola, 9 / 11 sa dinlenme)
+6. Duraklar gerçek tesislere oturtulur: mola sınırdan önceki son 45 dk, dinlenme son 2 sa sürüş içindeki
+   son uygun tesise çekilir (dinlenme için servis alanı / tır parkı). Günün bitmesine 2 saatten az kala
+   mola gerekiyorsa ve uygun tesis varsa gün orada bitirilir.
+7. Aday rotalar tesissiz karşılaştırılır; en erken varan (bekleme verisi eksiksiz olanlar önce) seçilir ve
+   tesislerle yeniden planlanır.
 
-Henüz yok: bölünmüş mola (15+30), 9 saatlik kısaltılmış dinlenme, haftalık limitler (56/90 sa),
-haftalık dinlenme, dinlenme tesislerine yerleştirme.
+Henüz yok: bölünmüş günlük dinlenme (3 + 9), kısaltılmış haftalık dinlenme (24 sa) ve telafisi,
+feribot / tren, kapıya varış saatine göre bekleme tahmini.
+
+## Yol haritası
+
+- Kapı randevu sistemi (resmi e-kuyruk entegrasyonu / tır parkı rezervasyonu) – kapsam netleşecek
+- Tesis bildirimleri: doluluk, güvenlik, fiyat
+- PostgreSQL, kendi Valhalla / Overpass / harita sunucuları
 
 ## API
 
@@ -76,4 +92,5 @@ haftalık dinlenme, dinlenme tesislerine yerleştirme.
 cd backend && go run ./cmd/api
 ```
 
-Ortam değişkenleri: `PORT` (8080), `VALHALLA_URL`, `PHOTON_URL`.
+Ortam değişkenleri: `PORT` (8080), `VALHALLA_URL`, `PHOTON_URL`, `OVERPASS_URL`, `OSM_COUNTRIES` (TR,GE,BG,…),
+`CACHE_DIR` (varsayılan kullanıcı önbellek klasörü / sinirdayim).

@@ -54,17 +54,27 @@ type Geocoder interface {
 	Search(ctx context.Context, query string, limit int) ([]domain.Place, error)
 }
 
-// RestAreaSource provides stopping places (OSM, operator feeds, user reports).
-type RestAreaSource interface {
+// Dataset is a periodically refreshed collection of reference data
+// (rest areas, border posts...) from one provider.
+type Dataset[T any] interface {
 	ID() string
 	Interval() time.Duration
-	Fetch(ctx context.Context) ([]domain.RestArea, error)
+	Fetch(ctx context.Context) ([]T, error)
 }
 
-// RestAreaStore keeps the known stopping places.
-type RestAreaStore interface {
-	// Replace swaps all places previously stored for sourceID.
-	Replace(ctx context.Context, sourceID string, areas []domain.RestArea) error
-	// InBounds returns places inside the south-west / north-east box.
-	InBounds(ctx context.Context, sw, ne domain.GeoPoint) ([]domain.RestArea, error)
+// GeoStore keeps located reference data, replaced per provider.
+type GeoStore[T any] interface {
+	// Replace swaps everything previously stored for sourceID.
+	Replace(ctx context.Context, sourceID string, items []T) error
+	// InBounds returns items inside the south-west / north-east box.
+	InBounds(ctx context.Context, sw, ne domain.GeoPoint) ([]T, error)
 }
+
+type (
+	// RestAreaSource provides stopping places (OSM, operator feeds, user reports).
+	RestAreaSource = Dataset[domain.RestArea]
+	RestAreaStore  = GeoStore[domain.RestArea]
+	// BorderPointSource provides border control posts from map data.
+	BorderPointSource = Dataset[domain.BorderPoint]
+	BorderPointStore  = GeoStore[domain.BorderPoint]
+)

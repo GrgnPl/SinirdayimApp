@@ -15,11 +15,12 @@ import (
 
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/geocoding/photon"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/httpapi"
+	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/osm"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/repository/memory"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/restarea/overpass"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/routing/valhalla"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/source/und"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/catalog"
+	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/estimator"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/usecase"
@@ -52,28 +53,39 @@ func run(log *slog.Logger) error {
 		Estimator: estimator.NewQueue(),
 	}
 	restAreas := memory.NewRestAreas()
+	borderPoints := memory.NewBorderPoints()
 	trips := &usecase.TripService{
-		Router:    valhalla.New(os.Getenv("VALHALLA_URL")),
-		Catalog:   crossings,
-		Status:    status,
-		RestAreas: restAreas,
+		Router:       valhalla.New(os.Getenv("VALHALLA_URL")),
+		Catalog:      crossings,
+		Status:       status,
+		RestAreas:    restAreas,
+		BorderPoints: borderPoints,
 	}
 	ingestor := &usecase.Ingestor{Sources: sources, Repo: repo, Log: log}
 	go ingestor.Run(ctx)
 
 	var countries []string
-	if v := os.Getenv("REST_AREA_COUNTRIES"); v != "" {
+	if v := os.Getenv("OSM_COUNTRIES"); v != "" {
 		countries = strings.Split(v, ",")
 	}
-	osm := overpass.New(os.Getenv("OVERPASS_URL"), countries)
-	osm.Log = log
-	osm.CacheDir = envOr("CACHE_DIR", defaultCacheDir())
-	restIngestor := &usecase.RestAreaIngestor{
-		Sources: []port.RestAreaSource{osm},
-		Store:   restAreas,
-		Log:     log,
-	}
-	go restIngestor.Run(ctx)
+	osmClient := osm.NewClient(os.Getenv("OVERPASS_URL"), countries)
+	osmClient.Log = log
+	osmClient.CacheDir = envOr("CACHE_DIR", defaultCacheDir())
+	borderIngest := &usecase.DatasetIngestor[domain.BorderPoint]{Name: "border points", Store: borderPoints, Log: log}
+	restIngest := &usecase.DatasetIngestor[domain.RestArea]{Name: "rest areas", Store: restAreas, Log: log}
+	// Both datasets share one client and refresh one after another to stay
+	// within the public Overpass server's limits.
+	go func() {
+		for {
+			borderIngest.RunOnce(ctx, osm.BorderControls{Client: osmClient})
+			restIngest.RunOnce(ctx, osm.RestAreas{Client: osmClient})
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(osmClient.MaxAge):
+			}
+		}
+	}()
 
 	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{

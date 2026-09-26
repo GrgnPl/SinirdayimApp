@@ -1,4 +1,4 @@
-package overpass
+package osm
 
 import (
 	"strings"
@@ -17,8 +17,8 @@ const fixture = `{"elements":[
  {"type":"node","id":77,"lat":41.6,"lon":40.3,"tags":{"amenity":"parking","hgv":"yes","access":"private"}}
 ]}`
 
-func TestParse(t *testing.T) {
-	areas, err := Parse(strings.NewReader(fixture), "TR")
+func TestParseRestAreas(t *testing.T) {
+	areas, err := ParseRestAreas(strings.NewReader(fixture), "TR")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,5 +41,20 @@ func TestParse(t *testing.T) {
 	f := areas[3]
 	if f.Kind != domain.RestAreaTruckFuel || f.Name != "Shell" || f.SuitsDailyRest() {
 		t.Errorf("fuel: %+v", f)
+	}
+}
+
+func TestParseBorderControls(t *testing.T) {
+	const data = `{"elements":[
+ {"type":"node","id":1,"lat":41.5178,"lon":41.5475,"tags":{"barrier":"border_control","name":"Sarp Gümrük Kapısı"}},
+ {"type":"way","id":2,"center":{"lat":41.72,"lon":26.36},"tags":{"barrier":"border_control"}},
+ {"type":"node","id":3,"lat":41.0,"lon":40.0,"tags":{"barrier":"gate"}}
+]}`
+	pts, err := ParseBorderControls(strings.NewReader(data), "TR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pts) != 2 || pts[0].ID != "osm:node/1" || pts[0].Name != "Sarp Gümrük Kapısı" || pts[1].Location.Lng != 26.36 {
+		t.Fatalf("points = %+v", pts)
 	}
 }

@@ -107,6 +107,9 @@ type TripService struct {
 	Status  *StatusService
 	// RestAreas is optional; without it stops are placed on the road.
 	RestAreas port.RestAreaStore
+	// BorderPoints is optional; with it, crossings missing from the catalog
+	// are still reported (without wait data) instead of silently ignored.
+	BorderPoints port.BorderPointStore
 }
 
 // routed is a computed route with everything needed to schedule it again.
@@ -402,7 +405,10 @@ func (s *TripService) crossingsOnRoute(ctx context.Context, route domain.Route, 
 	out := make([]CrossingOnRoute, 0, len(hits))
 	idxs := make([]int, 0, len(hits))
 	for _, h := range hits {
-		dir := direction(h.c, route.Shape, cum, h.idx)
+		dir, crossed := direction(h.c, route.Shape, cum, h.idx)
+		if !crossed {
+			continue
+		}
 		est, err := s.Status.Estimate(ctx, h.c, dir)
 		if err != nil {
 			return nil, nil, err
@@ -418,18 +424,177 @@ func (s *TripService) crossingsOnRoute(ctx context.Context, route domain.Route, 
 		})
 		idxs = append(idxs, h.idx)
 	}
-	return out, idxs, nil
+
+	unknown, err := s.unknownCrossings(ctx, route, cum, out)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, u := range unknown {
+		out = append(out, u)
+		idxs = append(idxs, min(sort.SearchFloat64s(cum, u.AtKm), len(cum)-1))
+	}
+	order := make([]int, len(out))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return out[order[a]].AtKm < out[order[b]].AtKm })
+	sortedOut := make([]CrossingOnRoute, len(out))
+	sortedIdx := make([]int, len(out))
+	for i, j := range order {
+		sortedOut[i], sortedIdx[i] = out[j], idxs[j]
+	}
+	return sortedOut, sortedIdx, nil
 }
 
-// direction decides which way the route passes a crossing by looking at a
-// point a few km before the gate: on side A the truck goes A → B (export
-// from the crossing's first country).
-func direction(c domain.Crossing, shape []domain.GeoPoint, cum []float64, idx int) domain.Direction {
-	before := geo.PointAtKm(shape, cum, max(cum[idx]-5, 0))
-	if side(c, before) == 0 {
-		return domain.DirectionExport
+const (
+	// borderPointOnRouteKm is how close a border post must be to the route.
+	borderPointOnRouteKm = 0.3
+	// sameCrossingKm merges posts of one crossing (both sides, several lanes)
+	// and matches them to catalog crossings.
+	sameCrossingKm = 5.0
+)
+
+// unknownCrossings finds border posts on the route that are not catalog
+// crossings. They have no wait data, which the plan must not hide.
+func (s *TripService) unknownCrossings(ctx context.Context, route domain.Route, cum []float64, known []CrossingOnRoute) ([]CrossingOnRoute, error) {
+	if s.BorderPoints == nil {
+		return nil, nil
 	}
-	return domain.DirectionImport
+	sw, ne := bounds(route.Shape, 0.05)
+	points, err := s.BorderPoints.InBounds(ctx, sw, ne)
+	if err != nil {
+		return nil, err
+	}
+	type onRoute struct {
+		p  domain.BorderPoint
+		km float64
+	}
+	var hits []onRoute
+	for _, p := range points {
+		if nearKnown(p.Location, known) {
+			continue
+		}
+		km, offset, ok := projectOnRoute(route.Shape, cum, p.Location)
+		if ok && offset <= borderPointOnRouteKm {
+			hits = append(hits, onRoute{p, km})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].km < hits[j].km })
+
+	// Group posts that belong to one crossing (both sides, several lanes).
+	type group struct {
+		first     onRoute
+		name      string
+		countries []string
+	}
+	var groups []*group
+	for _, h := range hits {
+		if n := len(groups); n > 0 && h.km-groups[n-1].first.km <= sameCrossingKm {
+			g := groups[n-1]
+			g.name = firstNonEmpty(g.name, h.p.Name)
+			g.countries = appendUnique(g.countries, h.p.Country)
+			continue
+		}
+		groups = append(groups, &group{first: h, name: h.p.Name, countries: appendUnique(nil, h.p.Country)})
+	}
+
+	var out []CrossingOnRoute
+	for _, g := range groups {
+		// Lone posts inside one country are often internal checkpoints;
+		// count them only when the name says it is a border crossing.
+		if len(g.countries) < 2 && !looksLikeCrossing(g.name) {
+			continue
+		}
+		c := CrossingOnRoute{
+			ID:       domain.CrossingID(g.first.p.ID),
+			Name:     firstNonEmpty(g.name, "Sınır kapısı (veri yok)"),
+			AtKm:     g.first.km,
+			Location: g.first.p.Location,
+			Estimate: domain.WaitEstimate{
+				CrossingID: domain.CrossingID(g.first.p.ID), Level: domain.LevelUnknown,
+				Confidence: domain.ConfidenceLow, Method: "none", BasedOn: []string{},
+			},
+		}
+		if len(g.countries) > 0 {
+			c.From = g.countries[0]
+		}
+		if len(g.countries) > 1 {
+			c.To = g.countries[1]
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// nearKnown reports whether p belongs to a catalog crossing on the route.
+// Straight-line distance: truck terminals can make the route wander around
+// a gate, so distances along the route would be misleading.
+func nearKnown(p domain.GeoPoint, crossings []CrossingOnRoute) bool {
+	for _, c := range crossings {
+		if geo.DistanceKm(p, c.Location) <= sameCrossingKm {
+			return true
+		}
+	}
+	return false
+}
+
+var crossingWords = []string{"kapı", "gümrük", "hudut", "border", "crossing", "customs", "checkpoint", "пункт", "кпп", "გამშვები", "مرز"}
+
+func looksLikeCrossing(name string) bool {
+	n := strings.ToLower(name)
+	for _, w := range crossingWords {
+		if strings.Contains(n, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUnique(list []string, v string) []string {
+	if v == "" {
+		return list
+	}
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// direction decides which way the route passes a crossing. It takes the
+// stretch of route within onRouteThresholdKm of the gate (truck terminals
+// make routes loop around gates) and compares the sides of points a few km
+// before entering and after leaving it: A → B is export from the crossing's
+// first country. ok is false when both are on the same side, i.e. the route
+// touches the gate without crossing there.
+func direction(c domain.Crossing, shape []domain.GeoPoint, cum []float64, idx int) (dir domain.Direction, ok bool) {
+	const probeKm = 5
+	lo, hi := idx, idx
+	for lo > 0 && geo.DistanceKm(shape[lo-1], c.Location) <= onRouteThresholdKm {
+		lo--
+	}
+	for hi < len(shape)-1 && geo.DistanceKm(shape[hi+1], c.Location) <= onRouteThresholdKm {
+		hi++
+	}
+	before := side(c, geo.PointAtKm(shape, cum, max(cum[lo]-probeKm, 0)))
+	after := side(c, geo.PointAtKm(shape, cum, min(cum[hi]+probeKm, cum[len(cum)-1])))
+	if before == after {
+		return "", false
+	}
+	if before == 0 {
+		return domain.DirectionExport, true
+	}
+	return domain.DirectionImport, true
 }
 
 // buildActivities turns route steps into drive activities, splitting the step
@@ -442,13 +607,13 @@ func buildActivities(route domain.Route, cum []float64, crossings []CrossingOnRo
 		for next < len(idxs) && idxs[next] >= begin && idxs[next] <= end {
 			split := idxs[next]
 			acts = append(acts, part(st, cum, begin, split))
+			// Unknown waits become zero-length waits so the crossing still
+			// shows up in the timeline.
+			wait := tacho.Activity{Kind: tacho.KindBorderWait, Ref: string(crossings[next].ID)}
 			if c := crossings[next]; c.WaitKnown {
-				acts = append(acts, tacho.Activity{
-					Kind:     tacho.KindBorderWait,
-					Duration: time.Duration(*c.Estimate.WaitMinutes) * time.Minute,
-					Ref:      string(c.ID),
-				})
+				wait.Duration = time.Duration(*c.Estimate.WaitMinutes) * time.Minute
 			}
+			acts = append(acts, wait)
 			begin = split
 			next++
 		}

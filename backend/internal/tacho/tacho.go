@@ -422,10 +422,10 @@ func (s *scheduler) resetWeekRest() {
 	s.weeklyRestDue = s.now.Add(MaxBetweenWeeklyRest)
 }
 
+// wait records a border wait. A zero-length wait still appears in the
+// timeline: it marks a crossing whose wait is unknown.
 func (s *scheduler) wait(a Activity) {
-	if a.Duration <= 0 {
-		return
-	}
+	a.Duration = max(a.Duration, 0)
 	km := s.track.kmAt(s.pos)
 	step := Step{Kind: KindBorderWait, Start: s.now, Duration: a.Duration, FromKm: km, ToKm: km, Ref: a.Ref}
 	s.plan.BorderWaits += a.Duration

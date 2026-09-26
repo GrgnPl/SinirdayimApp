@@ -106,9 +106,16 @@ func TestPlanDetectsImportDirection(t *testing.T) {
 	if c.Direction != domain.DirectionImport || c.From != "GE" || c.To != "TR" {
 		t.Errorf("crossing = %+v", c)
 	}
-	// No data for this direction: no wait inserted.
+	// No data for this direction: a zero-length wait marks the crossing.
 	if c.WaitKnown || plan.Totals.BorderWaitMin != 0 {
 		t.Errorf("unexpected wait: %+v", plan.Totals)
+	}
+	var marked bool
+	for _, st := range plan.Steps {
+		marked = marked || (st.Kind == tacho.KindBorderWait && st.DurationMin == 0 && st.CrossingID == "tr-ge-sarp")
+	}
+	if !marked {
+		t.Errorf("steps = %+v, want a zero-length border step for the crossing", plan.Steps)
 	}
 }
 
@@ -185,5 +192,48 @@ func TestSideOfCrossing(t *testing.T) {
 		if got := side(c, tc.a) == side(c, tc.b); got != tc.same {
 			t.Errorf("%s: same side = %v, want %v", tc.crossing, got, tc.same)
 		}
+	}
+}
+
+func TestPlanReportsCrossingMissingFromCatalog(t *testing.T) {
+	// A straight road far from any catalog crossing, with border posts on
+	// both sides of an unknown border at km ~100.
+	at := func(km float64) domain.GeoPoint { return domain.GeoPoint{Lat: 44.0 + km/111.2, Lng: 30.0} }
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{at(50), at(150)}, kmh: 60})
+	store := memory.NewBorderPoints()
+	store.Replace(context.Background(), "test", []domain.BorderPoint{
+		{ID: "osm:node/1", Name: "Kapı A", Location: at(99.5), Country: "AA"},
+		{ID: "osm:node/2", Location: domain.GeoPoint{Lat: at(100.3).Lat, Lng: 30.001}, Country: "BB"},
+		{ID: "osm:node/3", Location: domain.GeoPoint{Lat: at(120).Lat, Lng: 30.2}, Country: "BB"}, // 16 km off the road
+		{ID: "osm:node/4", Location: at(170), Country: "BB"},                                      // lone internal checkpoint
+	})
+	svc.BorderPoints = store
+
+	plan, err := svc.Plan(context.Background(), TripRequest{Origin: at(0), Destination: at(200), DepartAt: depart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Crossings) != 1 {
+		t.Fatalf("crossings = %+v, want one merged unknown crossing", plan.Crossings)
+	}
+	c := plan.Crossings[0]
+	if c.Name != "Kapı A" || c.From != "AA" || c.To != "BB" || c.WaitKnown || c.Estimate.Level != domain.LevelUnknown {
+		t.Errorf("crossing = %+v", c)
+	}
+	if plan.AllWaitsKnown {
+		t.Error("plan with an unknown crossing must not claim all waits are known")
+	}
+}
+
+func TestPlanIgnoresGateTouchedWithoutCrossing(t *testing.T) {
+	// Hopa → Sarp gate → back towards Hopa: the route never enters Georgia.
+	back := domain.GeoPoint{Lat: 41.35, Lng: 41.40}
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{sarp}, kmh: 60}, sarpWait)
+	plan, err := svc.Plan(context.Background(), TripRequest{Origin: hopa, Destination: back, DepartAt: depart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Crossings) != 0 || plan.Totals.BorderWaitMin != 0 {
+		t.Fatalf("crossings = %+v, wait = %d; want none", plan.Crossings, plan.Totals.BorderWaitMin)
 	}
 }
