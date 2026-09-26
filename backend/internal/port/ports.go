@@ -42,3 +42,14 @@ type SnapshotRepository interface {
 type Estimator interface {
 	Estimate(c domain.Crossing, dir domain.Direction, latest []domain.Snapshot) domain.WaitEstimate
 }
+
+// Router computes truck routes (Valhalla, HERE, TomTom...). The route must
+// pass through every via point in order without stopping.
+type Router interface {
+	Route(ctx context.Context, from, to domain.GeoPoint, via ...domain.GeoPoint) (domain.Route, error)
+}
+
+// Geocoder turns free text into places.
+type Geocoder interface {
+	Search(ctx context.Context, query string, limit int) ([]domain.Place, error)
+}

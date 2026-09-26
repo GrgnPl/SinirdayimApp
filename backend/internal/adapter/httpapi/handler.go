@@ -10,12 +10,15 @@ import (
 	"time"
 
 	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/usecase"
 )
 
 type Handler struct {
-	Status *usecase.StatusService
-	Log    *slog.Logger
+	Status   *usecase.StatusService
+	Trips    *usecase.TripService
+	Geocoder port.Geocoder
+	Log      *slog.Logger
 }
 
 // Routes:
@@ -23,6 +26,8 @@ type Handler struct {
 //	GET /healthz
 //	GET /v1/crossings                     all crossings with current estimates
 //	GET /v1/crossings/{id}?hours=48       one crossing with raw history
+//	POST /v1/trips/plan                   truck route with tachograph breaks and border waits
+//	GET /v1/places?q=samsun               place search for origin/destination
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -30,6 +35,8 @@ func (h *Handler) Routes() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/crossings", h.listCrossings)
 	mux.HandleFunc("GET /v1/crossings/{id}", h.getCrossing)
+	mux.HandleFunc("POST /v1/trips/plan", h.planTrip)
+	mux.HandleFunc("GET /v1/places", h.searchPlaces)
 	return withCORS(mux)
 }
 
@@ -81,6 +88,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

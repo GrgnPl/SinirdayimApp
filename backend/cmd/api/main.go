@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/geocoding/photon"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/httpapi"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/repository/memory"
+	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/routing/valhalla"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/source/und"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/catalog"
 	"github.com/burakaydin/sinir-bekleme/backend/internal/estimator"
@@ -40,18 +42,29 @@ func run(log *slog.Logger) error {
 	sources := []port.SnapshotSource{undSrc}
 
 	repo := memory.New()
+	crossings := catalog.NewStatic()
 	status := &usecase.StatusService{
-		Catalog:   catalog.NewStatic(),
+		Catalog:   crossings,
 		Repo:      repo,
 		Estimator: estimator.NewQueue(),
+	}
+	trips := &usecase.TripService{
+		Router:  valhalla.New(os.Getenv("VALHALLA_URL")),
+		Catalog: crossings,
+		Status:  status,
 	}
 	ingestor := &usecase.Ingestor{Sources: sources, Repo: repo, Log: log}
 	go ingestor.Run(ctx)
 
 	addr := ":" + envOr("PORT", "8080")
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           (&httpapi.Handler{Status: status, Log: log}).Routes(),
+		Addr: addr,
+		Handler: (&httpapi.Handler{
+			Status:   status,
+			Trips:    trips,
+			Geocoder: photon.New(os.Getenv("PHOTON_URL")),
+			Log:      log,
+		}).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

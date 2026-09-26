@@ -64,6 +64,15 @@ func (s *StatusService) Get(ctx context.Context, id domain.CrossingID, historySi
 	return CrossingDetail{CrossingStatus: st, History: hist}, nil
 }
 
+// Estimate returns the current wait estimate for one crossing and direction.
+func (s *StatusService) Estimate(ctx context.Context, c domain.Crossing, dir domain.Direction) (domain.WaitEstimate, error) {
+	latest, err := s.Repo.Latest(ctx, c.ID)
+	if err != nil {
+		return domain.WaitEstimate{}, err
+	}
+	return s.Estimator.Estimate(c, dir, latest), nil
+}
+
 func (s *StatusService) status(ctx context.Context, c domain.Crossing) (CrossingStatus, error) {
 	latest, err := s.Repo.Latest(ctx, c.ID)
 	if err != nil {

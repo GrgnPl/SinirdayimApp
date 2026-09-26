@@ -28,4 +28,7 @@ type Crossing struct {
 	// Lanes is the typical number of truck queue lanes; used to convert queue
 	// length (km) into a vehicle count.
 	Lanes int `json:"lanes"`
+	// SideRefs are reference points well inside each country (index matches
+	// Countries). They tell which way a route passes the crossing.
+	SideRefs [2]GeoPoint `json:"-"`
 }

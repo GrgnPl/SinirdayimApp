@@ -8,3 +8,5 @@ local.properties
 mobile/iosApp/Local.xcconfig
 xcuserdata/
 *.xcuserstate
+.kotlin/
+mobile/iosApp/build/

@@ -4,6 +4,8 @@ package com.sinirbekleme.presentation.util
 
 import com.sinirbekleme.domain.model.Direction
 import com.sinirbekleme.domain.model.Level
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -66,4 +68,13 @@ fun flagEmoji(countryCode: String): String {
         val v = cp - 0x10000
         charArrayOf((0xD800 + (v shr 10)).toChar(), (0xDC00 + (v and 0x3FF)).toChar()).concatToString()
     }.joinToString("")
+}
+
+private val weekdaysTr = listOf("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
+
+/** "Çar 04:52" in the device time zone. */
+fun formatClock(at: Instant): String {
+    val t = at.toLocalDateTime(TimeZone.currentSystemDefault())
+    val day = weekdaysTr[t.dayOfWeek.ordinal]
+    return "$day ${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')}"
 }
