@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ApiBaseUrl</key>
+	<string>$(API_BASE_URL)</string>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Development only: allows plain HTTP to the local backend. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Geliştirme sunucusuna bağlanmak için yerel ağ erişimi gerekiyor.</string>
+</dict>
+</plist>
