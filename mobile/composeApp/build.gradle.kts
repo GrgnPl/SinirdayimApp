@@ -54,11 +54,11 @@ kotlin {
 }
 
 android {
-    namespace = "com.sinirbekleme"
+    namespace = "com.sinirdayim"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.sinirbekleme"
+        applicationId = "com.sinirdayim"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
@@ -75,7 +75,7 @@ android {
         release {
             isMinifyEnabled = false
             manifestPlaceholders["usesCleartextTraffic"] = "false"
-            buildConfigField("String", "API_BASE_URL", "\"https://api.sinirbekleme.app\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://api.sinirdayim.com\"")
         }
     }
     compileOptions {

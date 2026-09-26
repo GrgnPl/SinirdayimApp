@@ -97,7 +97,7 @@ func (r *Router) Route(ctx context.Context, from, to domain.GeoPoint, via ...dom
 		return domain.Route{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "sinir-bekleme/0.1")
+	req.Header.Set("User-Agent", "sinirdayim/0.1")
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return domain.Route{}, fmt.Errorf("valhalla: %w", err)

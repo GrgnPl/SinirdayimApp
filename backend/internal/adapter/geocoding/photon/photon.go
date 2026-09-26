@@ -57,7 +57,7 @@ func (g *Geocoder) Search(ctx context.Context, query string, limit int) ([]domai
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sinir-bekleme/0.1")
+	req.Header.Set("User-Agent", "sinirdayim/0.1")
 	resp, err := g.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("photon: %w", err)

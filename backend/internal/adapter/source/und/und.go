@@ -62,7 +62,7 @@ func (s *Source) Fetch(ctx context.Context) ([]domain.Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sinir-bekleme/0.1 (+https://github.com/burakaydin/sinir-bekleme)")
+	req.Header.Set("User-Agent", "sinirdayim/0.1")
 	resp, err := s.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("und: fetch: %w", err)
