@@ -97,6 +97,7 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
             error = state.resultError,
             onSetAppointment = viewModel::setAppointment,
             onClearAppointment = viewModel::clearAppointment,
+            onDepartAt = viewModel::departAt,
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

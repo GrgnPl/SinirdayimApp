@@ -17,7 +17,9 @@ type planRequest struct {
 	Origin      *domain.GeoPoint `json:"origin"`
 	Destination *domain.GeoPoint `json:"destination"`
 	DepartAt    *time.Time       `json:"departAt"`
-	Driver      struct {
+	// StateAt is when the driver state was entered; defaults to departAt.
+	StateAt *time.Time `json:"stateAt"`
+	Driver  struct {
 		ContinuousDrivingMin int        `json:"continuousDrivingMin"`
 		SplitBreakTaken      bool       `json:"splitBreakTaken"`
 		DailyDrivingMin      int        `json:"dailyDrivingMin"`
@@ -63,12 +65,17 @@ func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
 	if req.DepartAt != nil {
 		in.DepartAt = *req.DepartAt
 	}
+	stateAt := in.DepartAt
+	if req.StateAt != nil && !req.StateAt.After(in.DepartAt) {
+		stateAt = *req.StateAt
+		in.StateAt = stateAt
+	}
 	if req.Driver.DutyStartedAt != nil {
 		in.Driver.DutyStartedAt = *req.Driver.DutyStartedAt
 	} else {
 		// Without an explicit start, assume the duty period began when
 		// today's driving began: the most conservative guess we can make.
-		in.Driver.DutyStartedAt = in.DepartAt.Add(-in.Driver.DailyDriving)
+		in.Driver.DutyStartedAt = stateAt.Add(-in.Driver.DailyDriving)
 	}
 	if a := req.Appointment; a != nil {
 		if a.CrossingID == "" || a.At.IsZero() {

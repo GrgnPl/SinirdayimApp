@@ -312,3 +312,27 @@ func TestInvalidStates(t *testing.T) {
 		}
 	}
 }
+
+func TestAfterIdle(t *testing.T) {
+	tired := DriverState{ContinuousDriving: 4 * time.Hour, DailyDriving: 8 * time.Hour, DutyStartedAt: depart.Add(-10 * time.Hour)}
+	end := depart.Add(12 * time.Hour)
+
+	if st := tired.AfterIdle(12*time.Hour, end); st.DailyDriving != 0 || st.ContinuousDriving != 0 || !st.DutyStartedAt.Equal(end) {
+		t.Errorf("12h idle: %+v, want a fresh day", st)
+	}
+	withReduced := tired
+	withReduced.ReducedRestsLeft = 1
+	if st := withReduced.AfterIdle(9*time.Hour+30*time.Minute, end); st.DailyDriving != 0 || st.ReducedRestsLeft != 0 {
+		t.Errorf("9.5h idle with a reduction: %+v, want reduced daily rest", st)
+	}
+	if st := tired.AfterIdle(time.Hour, end); st.ContinuousDriving != 0 || st.DailyDriving != 8*time.Hour {
+		t.Errorf("1h idle: %+v, want a break only", st)
+	}
+	if st := tired.AfterIdle(20*time.Minute, end); !st.SplitBreakTaken || st.ContinuousDriving != 4*time.Hour {
+		t.Errorf("20 min idle: %+v, want first part of a split break", st)
+	}
+	fresh := DriverState{DutyStartedAt: depart}
+	if st := fresh.AfterIdle(7*time.Hour, end); !st.DutyStartedAt.Equal(end) {
+		t.Errorf("fresh driver: duty starts at %v, want %v", st.DutyStartedAt, end)
+	}
+}

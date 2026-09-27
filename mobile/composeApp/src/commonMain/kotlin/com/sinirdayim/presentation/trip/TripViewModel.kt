@@ -110,7 +110,8 @@ class TripViewModel(
         val to = s.destination.selected ?: return
         _state.update { it.copy(isPlanning = true, error = null, activeField = null) }
         // A new trip starts without an appointment: the old one may not be on the new route.
-        val request = TripRequest(from.location, to.location, departAt(s.depart), s.driver)
+        // The driver state is entered now; waiting until a later departure is rest.
+        val request = TripRequest(from.location, to.location, departAt(s.depart), s.driver, stateAt = Clock.System.now())
         viewModelScope.launch {
             try {
                 val plan = planTrip(request)
@@ -129,6 +130,9 @@ class TripViewModel(
     fun setAppointment(crossingId: String, at: Instant) = replan { it.copy(appointment = Appointment(crossingId, at)) }
 
     fun clearAppointment() = replan { it.copy(appointment = null) }
+
+    /** Re-plans the current trip leaving at [at] instead. */
+    fun departAt(at: Instant) = replan { it.copy(departAt = at) }
 
     private fun replan(change: (TripRequest) -> TripRequest) {
         val request = change(lastRequest ?: return)

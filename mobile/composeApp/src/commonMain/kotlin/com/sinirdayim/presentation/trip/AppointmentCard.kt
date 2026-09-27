@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,6 +45,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sinirdayim.domain.model.AppointmentPlan
+import com.sinirdayim.domain.model.DepartureOption
 import com.sinirdayim.domain.model.ProcedureKind
 import com.sinirdayim.domain.model.TripCrossing
 import com.sinirdayim.domain.model.TripPlan
@@ -75,6 +77,7 @@ fun ProceduresCard(
     error: String?,
     onSetAppointment: (crossingId: String, at: Instant) -> Unit,
     onClearAppointment: () -> Unit,
+    onDepartAt: (Instant) -> Unit,
 ) {
     val crossings = plan.crossings.filter { it.procedures.isNotEmpty() }
     if (crossings.isEmpty()) return
@@ -91,7 +94,12 @@ fun ProceduresCard(
             c.appointmentSystem?.let { system ->
                 val booked = plan.appointment?.takeIf { it.crossingId == c.id }
                 if (booked != null) {
-                    BookedAppointment(c, booked, isPlanning, onChange = { pickerFor = c }, onClear = onClearAppointment)
+                    BookedAppointment(
+                        c, booked, plan, isPlanning,
+                        onChange = { pickerFor = c },
+                        onClear = onClearAppointment,
+                        onDepartAt = onDepartAt,
+                    )
                 } else {
                     AppointmentSuggestion(c, system.url, isPlanning, onEnter = { pickerFor = c })
                 }
@@ -164,7 +172,15 @@ private fun AppointmentSuggestion(c: TripCrossing, url: String?, isPlanning: Boo
 }
 
 @Composable
-private fun BookedAppointment(c: TripCrossing, a: AppointmentPlan, isPlanning: Boolean, onChange: () -> Unit, onClear: () -> Unit) {
+private fun BookedAppointment(
+    c: TripCrossing,
+    a: AppointmentPlan,
+    plan: TripPlan,
+    isPlanning: Boolean,
+    onChange: () -> Unit,
+    onClear: () -> Unit,
+    onDepartAt: (Instant) -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val levels = LocalLevelColors.current
     val statusColor = if (a.onTime) levels.low else levels.high
@@ -198,9 +214,46 @@ private fun BookedAppointment(c: TripCrossing, a: AppointmentPlan, isPlanning: B
             fontWeight = FontWeight.Medium,
             color = if (latest == null || latest < Clock.System.now()) levels.high else colors.onSurface,
         )
+        a.laterDeparture?.let { LaterDepartureHint(it, plan, isPlanning, onDepartAt) }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = onChange, enabled = !isPlanning) { Text("Değiştir") }
             TextButton(onClick = onClear, enabled = !isPlanning) { Text("Randevuyu kaldır") }
+        }
+    }
+}
+
+/** Leaving later can turn the wait into rest at home; say so when it helps. */
+@Composable
+private fun LaterDepartureHint(o: DepartureOption, plan: TripPlan, isPlanning: Boolean, onDepartAt: (Instant) -> Unit) {
+    val restNow = plan.totals.dailyRestMin + plan.totals.weeklyRestMin
+    val gainMin = ((plan.arrival - o.arrival).inWholeMinutes).toInt()
+    if (gainMin <= 0 && o.restMin >= restNow) return
+    val levels = LocalLevelColors.current
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(levels.low.copy(alpha = 0.10f)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            "${formatClock(o.departure)}'te çıkarsan",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = levels.low,
+        )
+        Text(
+            listOfNotNull(
+                "varış ${formatClock(o.arrival)}",
+                if (gainMin > 0) "${formatDuration(gainMin)} daha erken" else null,
+                if (o.restMin == 0) "yolda dinlenme yok" else "yolda ${formatDuration(o.restMin)} dinlenme",
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            "Kalkışa kadar geçen süre dinlenme sayılır.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = { onDepartAt(o.departure) }, enabled = !isPlanning, contentPadding = PaddingValues(0.dp)) {
+            Text("Bu kalkışla planla", color = levels.low, fontWeight = FontWeight.SemiBold)
         }
     }
 }

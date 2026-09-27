@@ -29,6 +29,8 @@ data class TripRequest(
     val departAt: Instant,
     val driver: DriverState,
     val appointment: Appointment? = null,
+    /** When [driver] was entered; time until [departAt] counts as rest. */
+    val stateAt: Instant? = null,
 )
 
 /** A booked slot at a crossing, e.g. RSS at Kapıkule. */
@@ -57,6 +59,15 @@ data class AppointmentPlan(
     val onTime: Boolean,
     /** Latest departure that still makes the slot; null if already too late. */
     val latestDeparture: Instant?,
+    /** The trip when leaving at [latestDeparture], resting until then. */
+    val laterDeparture: DepartureOption?,
+)
+
+data class DepartureOption(
+    val departure: Instant,
+    val arrival: Instant,
+    val onTime: Boolean,
+    val restMin: Int,
 )
 
 enum class StepKind { DRIVE, BREAK, DAILY_REST, WEEKLY_REST, BORDER_WAIT }

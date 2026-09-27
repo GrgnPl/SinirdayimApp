@@ -4,6 +4,7 @@ package com.sinirdayim.data.remote
 
 import com.sinirdayim.domain.model.GeoPoint
 import com.sinirdayim.domain.model.AppointmentPlan
+import com.sinirdayim.domain.model.DepartureOption
 import com.sinirdayim.domain.model.Place
 import com.sinirdayim.domain.model.Procedure
 import com.sinirdayim.domain.model.ProcedureKind
@@ -36,6 +37,7 @@ fun TripRequest.toDto() = PlanRequestDto(
         prevWeekDrivingMin = driver.prevWeekDrivingMin,
     ),
     appointment = appointment?.let { AppointmentDto(it.crossingId, it.at.toString()) },
+    stateAt = stateAt?.toString(),
 )
 
 fun TripPlanDto.toDomain() = TripPlan(
@@ -80,6 +82,9 @@ fun TripPlanDto.toDomain() = TripPlan(
             slackMin = it.slackMin,
             onTime = it.onTime,
             latestDeparture = it.latestDeparture?.let(::parseInstantOrNull),
+            laterDeparture = it.laterDeparture?.let { o ->
+                DepartureOption(Instant.parse(o.departure), Instant.parse(o.arrival), o.onTime, o.restMin)
+            },
         )
     },
 )

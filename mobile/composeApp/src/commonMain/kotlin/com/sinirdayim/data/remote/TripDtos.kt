@@ -15,6 +15,7 @@ data class PlanRequestDto(
     val departAt: String,
     val driver: DriverDto,
     val appointment: AppointmentDto? = null,
+    val stateAt: String? = null,
 )
 
 @Serializable
@@ -39,6 +40,15 @@ data class AppointmentPlanDto(
     val slackMin: Int,
     val onTime: Boolean,
     val latestDeparture: String? = null,
+    val laterDeparture: DepartureOptionDto? = null,
+)
+
+@Serializable
+data class DepartureOptionDto(
+    val departure: String,
+    val arrival: String,
+    val onTime: Boolean,
+    val restMin: Int,
 )
 
 @Serializable

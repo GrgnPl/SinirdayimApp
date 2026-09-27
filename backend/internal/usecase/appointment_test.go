@@ -100,3 +100,64 @@ func TestSuggestedAppointmentAtKapikule(t *testing.T) {
 		t.Errorf("import crossing = %+v, want no procedures", c)
 	}
 }
+
+func TestLaterDepartureRestsAtHome(t *testing.T) {
+	// A tired driver (8h driven today, duty started 10h ago) with a slot
+	// 14h away: leaving now means resting on the way, leaving at the latest
+	// departure means the wait counts as the daily rest.
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{sarp}, kmh: 60})
+	st := tacho.DriverState{DailyDriving: 8 * time.Hour, DutyStartedAt: depart.Add(-10 * time.Hour)}
+	slot := depart.Add(14 * time.Hour)
+	plan, err := svc.Plan(context.Background(), TripRequest{
+		Origin: hopa, Destination: batumi, DepartAt: depart, Driver: st, Appointment: sarpAppointment(slot),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := plan.Appointment.LaterDeparture
+	if later == nil {
+		t.Fatal("later departure option missing")
+	}
+	if !later.OnTime || !later.Departure.Equal(*plan.Appointment.LatestDeparture) {
+		t.Errorf("later = %+v", later)
+	}
+	if later.RestMin != 0 {
+		t.Errorf("later option rests %d min on the way, want 0 (rested before leaving)", later.RestMin)
+	}
+}
+
+func TestLaterDepartureCountsAsRest(t *testing.T) {
+	// State entered now (tired), departure 12 h later: the plan starts rested.
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{sarp}, kmh: 60})
+	st := tacho.DriverState{ContinuousDriving: 4 * time.Hour, DailyDriving: 9 * time.Hour, DutyStartedAt: depart.Add(-12 * time.Hour)}
+	plan, err := svc.Plan(context.Background(), TripRequest{
+		Origin: hopa, Destination: batumi, DepartAt: depart.Add(12 * time.Hour), StateAt: depart, Driver: st,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Totals.DailyRestMin != 0 || plan.Totals.BreakMin != 0 {
+		t.Errorf("totals = %+v, want no stops: the driver rested before leaving", plan.Totals)
+	}
+}
+
+func TestLatestDepartureCountsWaitingAsRest(t *testing.T) {
+	// Planned departure now, slot in 16 h. The driver has been on duty for
+	// 11 h with 0 h driving left... except that waiting 11 h at home resets
+	// the day, so the latest departure is just before the slot.
+	svc := newTripService(t, lineRouter{points: []domain.GeoPoint{sarp}, kmh: 60})
+	st := tacho.DriverState{DailyDriving: 9 * time.Hour, DutyStartedAt: depart.Add(-11 * time.Hour)}
+	slot := depart.Add(16 * time.Hour)
+	plan, err := svc.Plan(context.Background(), TripRequest{
+		Origin: hopa, Destination: batumi, DepartAt: depart, Driver: st, Appointment: sarpAppointment(slot),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drive := time.Duration(geo.DistanceKm(hopa, sarp) / 60 * float64(time.Hour))
+	want := slot.Add(-AppointmentMargin - drive)
+	got := plan.Appointment.LatestDeparture
+	if got == nil || want.Sub(*got) < 0 || want.Sub(*got) > 6*time.Minute {
+		t.Fatalf("latest departure = %v, want just before %v", got, want)
+	}
+}

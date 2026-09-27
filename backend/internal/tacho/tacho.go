@@ -521,3 +521,28 @@ func (tr track) timeAt(km float64) time.Duration {
 	f := (km - tr.km[i-1]) / span
 	return tr.t[i-1] + time.Duration(float64(tr.t[i]-tr.t[i-1])*f)
 }
+
+// AfterIdle returns the driver state after not driving for d, ending at end:
+// a long enough stop counts as a daily rest (regular, or reduced while
+// reductions are left), a break, or the first part of a split break. A
+// driver who has not driven since the last daily rest starts the duty
+// period at end.
+func (st DriverState) AfterIdle(d time.Duration, end time.Time) DriverState {
+	switch {
+	case d >= DailyRestDuration || (st.ReducedRestsLeft > 0 && d >= ReducedDailyRest):
+		if d < DailyRestDuration {
+			st.ReducedRestsLeft--
+		}
+		st.ContinuousDriving, st.SplitBreakTaken, st.DailyDriving = 0, false, 0
+		st.DutyStartedAt = end
+	case d >= BreakDuration || (st.SplitBreakTaken && d >= SplitBreakSecond):
+		st.ContinuousDriving, st.SplitBreakTaken = 0, false
+	case d >= SplitBreakFirst:
+		st.SplitBreakTaken = true
+	}
+	// No driving yet in this duty period: the day starts when driving does.
+	if st.DailyDriving == 0 {
+		st.DutyStartedAt = end
+	}
+	return st
+}

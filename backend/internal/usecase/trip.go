@@ -31,6 +31,9 @@ type TripRequest struct {
 	Destination domain.GeoPoint
 	DepartAt    time.Time
 	Driver      tacho.DriverState
+	// StateAt is when Driver was measured (usually "now"). A later
+	// departure counts the time in between as rest. Zero = DepartAt.
+	StateAt time.Time
 	// Appointment, when set, pins the route to its crossing and plans the
 	// wait there around the booked slot.
 	Appointment *Appointment
@@ -140,6 +143,9 @@ type planned struct {
 // border crossing, then returns the one that arrives first. Plans whose
 // border waits are all known win over plans with unknown waits.
 func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, error) {
+	if !req.StateAt.IsZero() && req.DepartAt.After(req.StateAt) {
+		req.Driver = req.Driver.AfterIdle(req.DepartAt.Sub(req.StateAt), req.DepartAt)
+	}
 	// With an appointment, the route must go through its crossing.
 	withDirect := req.Appointment == nil
 	var candidates []domain.Crossing
