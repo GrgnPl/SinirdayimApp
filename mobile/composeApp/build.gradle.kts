@@ -16,6 +16,8 @@ kotlin {
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
         androidResources { enable = true }
+        // Runs commonTest on the JVM: ./gradlew :composeApp:testAndroidHostTest
+        withHostTestBuilder {}
     }
 
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->

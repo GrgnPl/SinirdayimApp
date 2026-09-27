@@ -12,6 +12,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Yolculuk takibi için konumun kullanılır: plana göre ilerlemeni ve sınır randevuna yetişip yetişmeyeceğini gösterir.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Geliştirme sunucusuna bağlanmak için yerel ağ erişimi gerekiyor.</string>
 </dict>

@@ -6,11 +6,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinirdayim.domain.model.Appointment
 import com.sinirdayim.domain.model.DriverState
+import com.sinirdayim.domain.model.GeoPoint
 import com.sinirdayim.domain.model.Place
 import com.sinirdayim.domain.model.TripPlan
 import com.sinirdayim.domain.model.TripRequest
 import com.sinirdayim.domain.usecase.PlanTripUseCase
 import com.sinirdayim.domain.usecase.SearchPlacesUseCase
+import com.sinirdayim.domain.usecase.TripProgress
+import com.sinirdayim.domain.usecase.TripTracker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,6 +60,10 @@ data class TripUiState(
     val error: String? = null,
     /** Error from re-planning on the result screen (e.g. a new appointment). */
     val resultError: String? = null,
+    val tracking: Boolean = false,
+    val progress: TripProgress? = null,
+    val position: GeoPoint? = null,
+    val locationProblem: String? = null,
 ) {
     val canPlan: Boolean get() = origin.selected != null && destination.selected != null && !isPlanning
     fun field(e: Endpoint) = if (e == Endpoint.ORIGIN) origin else destination
@@ -102,6 +109,21 @@ class TripViewModel(
 
     /** Request of the plan on screen, reused when an appointment changes. */
     private var lastRequest: TripRequest? = null
+
+    private var tracker: TripTracker? = null
+
+    fun startTracking() = _state.update { it.copy(tracking = true, locationProblem = null) }
+
+    fun stopTracking() = _state.update { it.copy(tracking = false, progress = null, position = null, locationProblem = null) }
+
+    /** A GPS fix while tracking: compare it with the plan on screen. */
+    fun onLocation(position: GeoPoint, at: Instant) {
+        val plan = _state.value.plan ?: return
+        val t = tracker?.takeIf { it.plan === plan } ?: TripTracker(plan).also { tracker = it }
+        _state.update { it.copy(progress = t.progress(position, at), position = position, locationProblem = null) }
+    }
+
+    fun onLocationProblem(message: String) = _state.update { it.copy(locationProblem = message) }
 
     /** Plans the trip; calls [onDone] on success. */
     fun plan(onDone: () -> Unit) {

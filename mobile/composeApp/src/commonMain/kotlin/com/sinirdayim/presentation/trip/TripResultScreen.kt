@@ -86,7 +86,7 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
         )
 
         key(plan) {
-            TripMap(plan, Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large))
+            TripMap(plan, Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large), current = state.position)
         }
 
         ArrivalHero(plan)
@@ -98,6 +98,12 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
             onSetAppointment = viewModel::setAppointment,
             onClearAppointment = viewModel::clearAppointment,
             onDepartAt = viewModel::departAt,
+        )
+
+        TrackingCard(
+            state = state,
+            viewModel = viewModel,
+            rssUrl = plan.crossings.firstOrNull { it.id == plan.appointment?.crossingId }?.appointmentSystem?.url,
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

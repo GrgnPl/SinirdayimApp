@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.sinirdayim.domain.model.GeoPoint
 import com.sinirdayim.domain.model.StepKind
 import com.sinirdayim.domain.model.TripPlan
 import com.sinirdayim.presentation.theme.LocalLevelColors
@@ -22,7 +23,7 @@ import org.maplibre.spatialk.geojson.Position
 
 /** Route line with border crossings, breaks and daily rests. */
 @Composable
-fun TripMap(plan: TripPlan, modifier: Modifier = Modifier) {
+fun TripMap(plan: TripPlan, modifier: Modifier = Modifier, current: GeoPoint? = null) {
     val levels = LocalLevelColors.current
     val routeColor = MaterialTheme.colorScheme.primary
     val surface = MaterialTheme.colorScheme.surface
@@ -55,6 +56,14 @@ fun TripMap(plan: TripPlan, modifier: Modifier = Modifier) {
             color = const(routeColor), radius = const(6.dp),
             strokeColor = const(surface), strokeWidth = const(3.dp),
         )
+
+        // The truck while tracking.
+        val me = rememberGeoJsonSource(pointsData(listOfNotNull(current).map { PointFeature(it) }))
+        CircleLayer(
+            id = "me", source = me,
+            color = const(CurrentColor), radius = const(8.dp),
+            strokeColor = const(surface), strokeWidth = const(3.dp),
+        )
     }
 
     LaunchedEffect(plan) {
@@ -76,3 +85,4 @@ private fun stopLayer(id: String, plan: TripPlan, kind: StepKind, color: Color, 
 }
 
 val RestColor = Color(0xFF5B6CFF)
+private val CurrentColor = Color(0xFF1E88E5)

@@ -62,4 +62,11 @@ Sürücü adına RSS'ten randevu almak da mümkün değil: sürücünün kendi h
 - Mobil: sonuç ekranında "Sınır işlemleri" kartı – RSS'i aç, randevumu gir (gün + yarım saatlik seçim), yetişiyor /
   geç kalıyor, en geç kalkış, değiştir / kaldır.
 
-Sıradaki: "en geç kalkışta çıkarsan" planını da göstermek, yolda gecikme olunca erteleme uyarısı (GPS), RSS API görüşmesi.
+- Kalkış ertelemesi: en geç kalkışa kadar beklemek dinlenme sayılır (`tacho.DriverState.AfterIdle`); plan bu kalkışla
+  varışı ve yoldaki dinlenmeyi karşılaştırır, kazanç varsa mobilde tek dokunuşla o kalkışa göre yeniden planlanır.
+  İstek `stateAt` (sürücü durumunun girildiği an) alır; formdaki ileri kalkışlar da aradaki süreyi dinlenme sayar.
+- Yolculuk takibi (mobil, uygulama açıkken): GPS konumu rota çizgisine izdüşürülür, planın o km için öngördüğü
+  zaman penceresiyle karşılaştırılıp gecikme bulunur; kapıya tahmini varış randevuyla kıyaslanır, geç kalınacaksa
+  "RSS'ten ertele" uyarısı çıkar. Rotadan 2 km'den fazla sapma ayrıca gösterilir. Hesap cihazda, çevrimdışı çalışır.
+
+Sıradaki: arka planda takip (Android foreground service / iOS background location) ve yerel bildirim, RSS API görüşmesi.
