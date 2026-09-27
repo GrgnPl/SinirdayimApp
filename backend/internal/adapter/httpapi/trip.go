@@ -28,6 +28,11 @@ type planRequest struct {
 		PrevWeekDrivingMin   int        `json:"prevWeekDrivingMin"`
 		LastWeeklyRestEnd    *time.Time `json:"lastWeeklyRestEnd"`
 	} `json:"driver"`
+	// Appointment is a booked slot, e.g. RSS at Kapıkule.
+	Appointment *struct {
+		CrossingID string    `json:"crossingId"`
+		At         time.Time `json:"at"`
+	} `json:"appointment"`
 }
 
 func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +70,13 @@ func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
 		// today's driving began: the most conservative guess we can make.
 		in.Driver.DutyStartedAt = in.DepartAt.Add(-in.Driver.DailyDriving)
 	}
+	if a := req.Appointment; a != nil {
+		if a.CrossingID == "" || a.At.IsZero() {
+			writeJSON(w, http.StatusBadRequest, errorBody("appointment needs crossingId and at"))
+			return
+		}
+		in.Appointment = &usecase.Appointment{CrossingID: domain.CrossingID(a.CrossingID), At: a.At}
+	}
 	if req.Driver.LastWeeklyRestEnd != nil {
 		in.Driver.LastWeeklyRestEnd = *req.Driver.LastWeeklyRestEnd
 	}
@@ -78,6 +90,10 @@ func (h *Handler) planTrip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody("driver state is outside tachograph limits"))
 	case errors.Is(err, domain.ErrNoRoute):
 		writeJSON(w, http.StatusUnprocessableEntity, errorBody("no truck route found between these points"))
+	case errors.Is(err, usecase.ErrAppointmentNotOnRoute):
+		writeJSON(w, http.StatusUnprocessableEntity, errorBody("the appointment crossing is not on a route between these points"))
+	case errors.Is(err, domain.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, errorBody("unknown crossing"))
 	case err != nil:
 		h.fail(w, err)
 	default:

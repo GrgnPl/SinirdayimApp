@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -30,6 +31,9 @@ type TripRequest struct {
 	Destination domain.GeoPoint
 	DepartAt    time.Time
 	Driver      tacho.DriverState
+	// Appointment, when set, pins the route to its crossing and plans the
+	// wait there around the booked slot.
+	Appointment *Appointment
 }
 
 // CrossingOnRoute is a border crossing the route passes through.
@@ -45,6 +49,11 @@ type CrossingOnRoute struct {
 	// WaitKnown is false when no wait time is available; the plan then
 	// assumes no wait at this crossing.
 	WaitKnown bool `json:"waitKnown"`
+	// Procedures that apply in this direction (appointment, truck park...).
+	Procedures []domain.Procedure `json:"procedures,omitempty"`
+	// SuggestedAppointment is the slot to book when the crossing requires
+	// one: the planned arrival rounded up to the next half hour.
+	SuggestedAppointment *time.Time `json:"suggestedAppointment,omitempty"`
 }
 
 type TripStep struct {
@@ -99,6 +108,8 @@ type TripPlan struct {
 	// AllWaitsKnown is false when a crossing on the route has no wait data.
 	AllWaitsKnown bool              `json:"allWaitsKnown"`
 	Alternatives  []TripAlternative `json:"alternatives"`
+	// Appointment tells how the trip fits a booked slot, when one was given.
+	Appointment *AppointmentPlan `json:"appointment,omitempty"`
 }
 
 type TripService struct {
@@ -129,18 +140,34 @@ type planned struct {
 // border crossing, then returns the one that arrives first. Plans whose
 // border waits are all known win over plans with unknown waits.
 func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, error) {
-	candidates, err := s.candidateCrossings(ctx, req.Origin, req.Destination)
-	if err != nil {
-		return TripPlan{}, err
+	// With an appointment, the route must go through its crossing.
+	withDirect := req.Appointment == nil
+	var candidates []domain.Crossing
+	if req.Appointment != nil {
+		c, err := s.Catalog.Get(ctx, req.Appointment.CrossingID)
+		if err != nil {
+			return TripPlan{}, err
+		}
+		candidates = []domain.Crossing{c}
+	} else {
+		var err error
+		if candidates, err = s.candidateCrossings(ctx, req.Origin, req.Destination); err != nil {
+			return TripPlan{}, err
+		}
 	}
 
 	type result struct {
 		p   planned
 		err error
 	}
+	// Index 0 is the direct route, then one route through each candidate.
 	results := make([]result, len(candidates)+1)
 	var wg sync.WaitGroup
 	for i := range results {
+		if i == 0 && !withDirect {
+			results[i].err = errSkipped
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -160,6 +187,7 @@ func (s *TripService) Plan(ctx context.Context, req TripRequest) (TripPlan, erro
 		switch {
 		case r.err == nil:
 			plans = append(plans, r.p)
+		case errors.Is(r.err, errSkipped):
 		case firstErr == nil:
 			firstErr = r.err
 		}
@@ -294,12 +322,14 @@ func (s *TripService) planRoute(ctx context.Context, req TripRequest, via []doma
 	}
 	r := &routed{route: route, cum: cum, crossings: crossings, activities: buildActivities(route, cum, crossings, idxs)}
 
-	sched, err := tacho.Schedule(r.activities, req.DepartAt, req.Driver)
+	sched, appt, err := scheduleFor(r, req, nil)
 	if err != nil {
 		return planned{}, err
 	}
-	return planned{plan: assemble(r, sched, nil), r: r}, nil
+	return planned{plan: assemble(r, sched, nil, appt), r: r}, nil
 }
+
+var errSkipped = errors.New("skipped")
 
 // withRestAreas reschedules a route so breaks and rests fall on real places.
 // Without a store, or when none is near the route, the plan is unchanged.
@@ -316,26 +346,46 @@ func (s *TripService) withRestAreas(ctx context.Context, req TripRequest, p plan
 	if len(stops.items) == 0 {
 		return p.plan, nil
 	}
-	sched, err := tacho.ScheduleWith(p.r.activities, req.DepartAt, req.Driver, stops)
+	sched, appt, err := scheduleFor(p.r, req, stops)
 	if err != nil {
 		return TripPlan{}, err
 	}
-	return assemble(p.r, sched, stops), nil
+	return assemble(p.r, sched, stops, appt), nil
 }
 
 // assemble turns a schedule into the API plan.
-func assemble(r *routed, sched tacho.Plan, stops *routeStops) TripPlan {
+func assemble(r *routed, sched tacho.Plan, stops *routeStops, appt *AppointmentPlan) TripPlan {
+	arrivals := map[string]time.Time{}
+	for _, st := range sched.Steps {
+		if st.Kind == tacho.KindBorderWait {
+			arrivals[st.Ref] = st.Start
+		}
+	}
+	// Copy: routes are shared between candidate plans.
+	crossings := append([]CrossingOnRoute(nil), r.crossings...)
 	allKnown := true
-	for _, c := range r.crossings {
+	for i := range crossings {
+		c := &crossings[i]
+		if appt != nil && c.ID == appt.CrossingID {
+			c.WaitKnown = true // the booked slot defines the wait
+			appt.CrossingName = c.Name
+		}
+		for _, p := range c.Procedures {
+			if at, ok := arrivals[string(c.ID)]; ok && p.Kind == domain.ProcedureAppointment {
+				slot := suggestedSlot(at)
+				c.SuggestedAppointment = &slot
+			}
+		}
 		allKnown = allKnown && c.WaitKnown
 	}
 	out := TripPlan{
 		DistanceKm:    r.cum[len(r.cum)-1],
 		Departure:     sched.Departure,
 		Arrival:       sched.Arrival,
-		Crossings:     r.crossings,
+		Crossings:     crossings,
 		Polyline:      r.route.Polyline,
 		AllWaitsKnown: allKnown,
+		Appointment:   appt,
 		Totals: TripTotals{
 			DrivingMin:    minutes(sched.Driving),
 			BreakMin:      minutes(sched.Breaks),
@@ -420,7 +470,8 @@ func (s *TripService) crossingsOnRoute(ctx context.Context, route domain.Route, 
 		out = append(out, CrossingOnRoute{
 			ID: h.c.ID, Name: h.c.Name, From: from, To: to, Direction: dir,
 			AtKm: cum[h.idx], Location: h.c.Location, Estimate: est,
-			WaitKnown: est.WaitMinutes != nil,
+			WaitKnown:  est.WaitMinutes != nil,
+			Procedures: h.c.ProceduresFor(dir),
 		})
 		idxs = append(idxs, h.idx)
 	}

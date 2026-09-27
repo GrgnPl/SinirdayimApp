@@ -31,4 +31,50 @@ type Crossing struct {
 	// SideRefs are reference points well inside each country (index matches
 	// Countries). They tell which way a route passes the crossing.
 	SideRefs [2]GeoPoint `json:"-"`
+	// Procedures are formalities trucks must go through, per direction.
+	Procedures []Procedure `json:"procedures,omitempty"`
+}
+
+// ProcedureKind is the type of formality at a crossing.
+type ProcedureKind string
+
+const (
+	// ProcedureAppointment: a time slot must be booked in an official
+	// queue system before reaching the gate.
+	ProcedureAppointment ProcedureKind = "appointment"
+	// ProcedureTruckPark: trucks must enter a licensed park where the
+	// electronic queue is run; no remote booking.
+	ProcedureTruckPark ProcedureKind = "truck_park"
+)
+
+// Procedure is a formality at a crossing in one direction.
+type Procedure struct {
+	Kind      ProcedureKind `json:"kind"`
+	Direction Direction     `json:"direction"`
+	System    string        `json:"system"` // "RSS – Randevulu Sanal Sıra Sistemi"
+	URL       string        `json:"url,omitempty"`
+	Mandatory bool          `json:"mandatory"`
+	Fee       string        `json:"fee,omitempty"` // free text, e.g. "80 GEL / römork"
+	Note      string        `json:"note,omitempty"`
+}
+
+// ProceduresFor returns the procedures that apply in direction dir.
+func (c Crossing) ProceduresFor(dir Direction) []Procedure {
+	var out []Procedure
+	for _, p := range c.Procedures {
+		if p.Direction == dir {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// AppointmentSystem returns the booking procedure for direction dir, if any.
+func (c Crossing) AppointmentSystem(dir Direction) (Procedure, bool) {
+	for _, p := range c.ProceduresFor(dir) {
+		if p.Kind == ProcedureAppointment {
+			return p, true
+		}
+	}
+	return Procedure{}, false
 }
