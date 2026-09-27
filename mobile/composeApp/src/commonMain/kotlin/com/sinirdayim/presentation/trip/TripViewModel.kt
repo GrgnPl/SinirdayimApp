@@ -4,6 +4,7 @@ package com.sinirdayim.presentation.trip
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sinirdayim.domain.model.Appointment
 import com.sinirdayim.domain.model.DriverState
 import com.sinirdayim.domain.model.Place
 import com.sinirdayim.domain.model.TripPlan
@@ -54,6 +55,8 @@ data class TripUiState(
     val isPlanning: Boolean = false,
     val plan: TripPlan? = null,
     val error: String? = null,
+    /** Error from re-planning on the result screen (e.g. a new appointment). */
+    val resultError: String? = null,
 ) {
     val canPlan: Boolean get() = origin.selected != null && destination.selected != null && !isPlanning
     fun field(e: Endpoint) = if (e == Endpoint.ORIGIN) origin else destination
@@ -97,21 +100,48 @@ class TripViewModel(
 
     fun onDriver(driver: DriverState) = _state.update { it.copy(driver = driver) }
 
+    /** Request of the plan on screen, reused when an appointment changes. */
+    private var lastRequest: TripRequest? = null
+
     /** Plans the trip; calls [onDone] on success. */
     fun plan(onDone: () -> Unit) {
         val s = _state.value
         val from = s.origin.selected ?: return
         val to = s.destination.selected ?: return
         _state.update { it.copy(isPlanning = true, error = null, activeField = null) }
+        // A new trip starts without an appointment: the old one may not be on the new route.
+        val request = TripRequest(from.location, to.location, departAt(s.depart), s.driver)
         viewModelScope.launch {
             try {
-                val plan = planTrip(TripRequest(from.location, to.location, departAt(s.depart), s.driver))
-                _state.update { it.copy(plan = plan, isPlanning = false) }
+                val plan = planTrip(request)
+                lastRequest = request
+                _state.update { it.copy(plan = plan, isPlanning = false, resultError = null) }
                 onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(isPlanning = false, error = "Rota planlanamadı. Noktaları kontrol edip tekrar dene.") }
+            }
+        }
+    }
+
+    /** Re-plans the current trip around a booked slot. */
+    fun setAppointment(crossingId: String, at: Instant) = replan { it.copy(appointment = Appointment(crossingId, at)) }
+
+    fun clearAppointment() = replan { it.copy(appointment = null) }
+
+    private fun replan(change: (TripRequest) -> TripRequest) {
+        val request = change(lastRequest ?: return)
+        _state.update { it.copy(isPlanning = true, resultError = null) }
+        viewModelScope.launch {
+            try {
+                val plan = planTrip(request)
+                lastRequest = request
+                _state.update { it.copy(plan = plan, isPlanning = false) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(isPlanning = false, resultError = "Randevuyla plan yapılamadı. Saati kontrol edip tekrar dene.") }
             }
         }
     }

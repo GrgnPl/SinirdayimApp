@@ -14,6 +14,31 @@ data class PlanRequestDto(
     val destination: GeoPointDto,
     val departAt: String,
     val driver: DriverDto,
+    val appointment: AppointmentDto? = null,
+)
+
+@Serializable
+data class AppointmentDto(val crossingId: String, val at: String)
+
+@Serializable
+data class ProcedureDto(
+    val kind: String,
+    val system: String,
+    val url: String? = null,
+    val mandatory: Boolean = false,
+    val fee: String? = null,
+    val note: String? = null,
+)
+
+@Serializable
+data class AppointmentPlanDto(
+    val crossingId: String,
+    val crossingName: String = "",
+    val at: String,
+    val arriveAt: String,
+    val slackMin: Int,
+    val onTime: Boolean,
+    val latestDeparture: String? = null,
 )
 
 @Serializable
@@ -38,6 +63,7 @@ data class TripPlanDto(
     val polyline: String = "",
     val allWaitsKnown: Boolean = true,
     val alternatives: List<TripAlternativeDto> = emptyList(),
+    val appointment: AppointmentPlanDto? = null,
 )
 
 @Serializable
@@ -59,6 +85,8 @@ data class TripCrossingDto(
     val atKm: Double,
     val location: GeoPointDto,
     val estimate: WaitEstimateDto,
+    val procedures: List<ProcedureDto> = emptyList(),
+    val suggestedAppointment: String? = null,
 )
 
 @Serializable

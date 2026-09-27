@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinirdayim.domain.model.AppointmentPlan
 import com.sinirdayim.domain.model.RestArea
 import com.sinirdayim.domain.model.RestAreaKind
 import com.sinirdayim.domain.model.StepKind
@@ -89,6 +90,14 @@ fun TripResultScreen(viewModel: TripViewModel, onBack: () -> Unit) {
         }
 
         ArrivalHero(plan)
+
+        ProceduresCard(
+            plan = plan,
+            isPlanning = state.isPlanning,
+            error = state.resultError,
+            onSetAppointment = viewModel::setAppointment,
+            onClearAppointment = viewModel::clearAppointment,
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatTile("Sürüş", formatDuration(plan.totals.drivingMin), Modifier.weight(1f))
@@ -188,7 +197,7 @@ private fun Timeline(plan: TripPlan) {
                 icon = icon,
                 tint = tint,
                 title = stepTitle(step, names),
-                subtitle = stepSubtitle(step),
+                subtitle = stepSubtitle(step, plan.appointment),
                 time = formatClock(step.start),
                 isLast = false,
             )
@@ -252,7 +261,7 @@ private fun stepTitle(step: TripStep, crossingNames: Map<String, String>): Strin
         if (step.durationMin == 0) " · bekleme verisi yok" else " · ${formatDuration(step.durationMin)} bekleme"
 }
 
-private fun stepSubtitle(step: TripStep): String = when (step.kind) {
+private fun stepSubtitle(step: TripStep, appointment: AppointmentPlan?): String = when (step.kind) {
     StepKind.DRIVE -> "km ${step.fromKm.roundToInt()} → ${step.toKm.roundToInt()} · ${(step.toKm - step.fromKm).roundToInt()} km"
     StepKind.BREAK, StepKind.DAILY_REST, StepKind.WEEKLY_REST -> listOfNotNull(
         "km ${step.fromKm.roundToInt()}",
@@ -273,6 +282,8 @@ private fun stepSubtitle(step: TripStep): String = when (step.kind) {
         },
     ).joinToString(" · ")
     StepKind.BORDER_WAIT -> "km ${step.fromKm.roundToInt()} · " + when {
+        appointment?.crossingId == step.crossingId && appointment != null ->
+            "RSS randevusu ${formatClock(appointment.at)} – randevuya kadar bekleme ve geçiş"
         step.durationMin == 0 -> "süre plana eklenmedi, varış daha geç olabilir"
         step.countsAs == StepKind.DAILY_REST -> "günlük dinlenme yerine sayılır"
         step.countsAs == StepKind.BREAK -> "mola yerine sayılır"

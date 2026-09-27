@@ -50,3 +50,16 @@ Sürücü adına RSS'ten randevu almak da mümkün değil: sürücünün kendi h
    randevu (yazma) için API görüşmesi. Onay gelirse sürücü tek ekrandan randevu alabilir.
 4. **Kendi rezervasyonumuz**: resmi sistemi olmayan yerlerde kapı sırası değil, **TIR parkı / güvenli otopark
    rezervasyonu** (işletmelerle anlaşmalı, ticari model).
+
+## Uygulanan (2026-09-27)
+
+- Katalog: Kapıkule çıkışında RSS zorunlu; Sarp ve Türkgözü'nde Gürcistan çıkışında TIR parkı zorunlu (80 GEL).
+  Hamzabeyli / Karkamış RSS kapsamı doğrulanamadığı için işaretlenmedi.
+- Plan, RSS'li kapı için kapıya varışı yarım saate yuvarlayıp **önerilen randevu** olarak döner.
+- `POST /v1/trips/plan` isteğinde `appointment: {crossingId, at}` verilirse rota o kapıya sabitlenir, kapıdaki bekleme
+  "randevuya kalan süre + 1 sa geçiş" olur (geçiş süresi varsayım), yanıtta varış, erken/geç dakika ve
+  **en geç kalkış** (kapıda 30 dk pay, aynı sürücü durumuyla) döner.
+- Mobil: sonuç ekranında "Sınır işlemleri" kartı – RSS'i aç, randevumu gir (gün + yarım saatlik seçim), yetişiyor /
+  geç kalıyor, en geç kalkış, değiştir / kaldır.
+
+Sıradaki: "en geç kalkışta çıkarsan" planını da göstermek, yolda gecikme olunca erteleme uyarısı (GPS), RSS API görüşmesi.

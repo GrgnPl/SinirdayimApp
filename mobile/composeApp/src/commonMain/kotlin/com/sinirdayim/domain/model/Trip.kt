@@ -28,6 +28,35 @@ data class TripRequest(
     val destination: GeoPoint,
     val departAt: Instant,
     val driver: DriverState,
+    val appointment: Appointment? = null,
+)
+
+/** A booked slot at a crossing, e.g. RSS at Kapıkule. */
+data class Appointment(val crossingId: String, val at: Instant)
+
+enum class ProcedureKind { APPOINTMENT, TRUCK_PARK }
+
+/** A formality at a crossing in the travel direction. */
+data class Procedure(
+    val kind: ProcedureKind,
+    val system: String,
+    val url: String?,
+    val mandatory: Boolean,
+    val fee: String?,
+    val note: String?,
+)
+
+/** How the trip fits a booked slot. */
+data class AppointmentPlan(
+    val crossingId: String,
+    val crossingName: String,
+    val at: Instant,
+    val arriveAt: Instant,
+    /** Minutes between arrival and the slot; negative when late. */
+    val slackMin: Int,
+    val onTime: Boolean,
+    /** Latest departure that still makes the slot; null if already too late. */
+    val latestDeparture: Instant?,
 )
 
 enum class StepKind { DRIVE, BREAK, DAILY_REST, WEEKLY_REST, BORDER_WAIT }
@@ -76,7 +105,11 @@ data class TripCrossing(
     val atKm: Double,
     val waitMinutes: Int?,
     val level: Level,
-)
+    val procedures: List<Procedure>,
+    val suggestedAppointment: Instant?,
+) {
+    val appointmentSystem: Procedure? get() = procedures.firstOrNull { it.kind == ProcedureKind.APPOINTMENT }
+}
 
 data class TripAlternative(
     val via: List<String>,
@@ -106,4 +139,5 @@ data class TripPlan(
     val allWaitsKnown: Boolean,
     val alternatives: List<TripAlternative>,
     val route: List<GeoPoint>,
+    val appointment: AppointmentPlan?,
 )

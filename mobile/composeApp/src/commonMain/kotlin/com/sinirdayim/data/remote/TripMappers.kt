@@ -3,7 +3,10 @@
 package com.sinirdayim.data.remote
 
 import com.sinirdayim.domain.model.GeoPoint
+import com.sinirdayim.domain.model.AppointmentPlan
 import com.sinirdayim.domain.model.Place
+import com.sinirdayim.domain.model.Procedure
+import com.sinirdayim.domain.model.ProcedureKind
 import com.sinirdayim.domain.model.RestArea
 import com.sinirdayim.domain.model.RestAreaKind
 import com.sinirdayim.domain.model.StepKind
@@ -32,6 +35,7 @@ fun TripRequest.toDto() = PlanRequestDto(
         weeklyDrivingMin = driver.weeklyDrivingMin,
         prevWeekDrivingMin = driver.prevWeekDrivingMin,
     ),
+    appointment = appointment?.let { AppointmentDto(it.crossingId, it.at.toString()) },
 )
 
 fun TripPlanDto.toDomain() = TripPlan(
@@ -48,7 +52,18 @@ fun TripPlanDto.toDomain() = TripPlan(
     ),
     crossings = crossings.map {
         val est = it.estimate.toDomain()
-        TripCrossing(it.id, it.name, GeoPoint(it.location.lat, it.location.lng), it.from, it.to, it.atKm, est.waitMinutes, est.level)
+        TripCrossing(
+            id = it.id,
+            name = it.name,
+            location = GeoPoint(it.location.lat, it.location.lng),
+            from = it.from,
+            to = it.to,
+            atKm = it.atKm,
+            waitMinutes = est.waitMinutes,
+            level = est.level,
+            procedures = it.procedures.mapNotNull { p -> p.toDomainOrNull() },
+            suggestedAppointment = it.suggestedAppointment?.let(::parseInstantOrNull),
+        )
     },
     steps = steps.mapNotNull { it.toDomainOrNull() },
     allWaitsKnown = allWaitsKnown,
@@ -56,7 +71,33 @@ fun TripPlanDto.toDomain() = TripPlan(
         TripAlternative(it.via, it.distanceKm, it.totalMin, it.borderWaitMin, it.allWaitsKnown, it.selected)
     },
     route = decodePolyline(polyline),
+    appointment = appointment?.let {
+        AppointmentPlan(
+            crossingId = it.crossingId,
+            crossingName = it.crossingName,
+            at = Instant.parse(it.at),
+            arriveAt = Instant.parse(it.arriveAt),
+            slackMin = it.slackMin,
+            onTime = it.onTime,
+            latestDeparture = it.latestDeparture?.let(::parseInstantOrNull),
+        )
+    },
 )
+
+private fun ProcedureDto.toDomainOrNull(): Procedure? = Procedure(
+    kind = when (kind) {
+        "appointment" -> ProcedureKind.APPOINTMENT
+        "truck_park" -> ProcedureKind.TRUCK_PARK
+        else -> return null
+    },
+    system = system,
+    url = url,
+    mandatory = mandatory,
+    fee = fee,
+    note = note,
+)
+
+private fun parseInstantOrNull(value: String): Instant? = runCatching { Instant.parse(value) }.getOrNull()
 
 private fun stepKind(value: String?): StepKind? = when (value) {
     "drive" -> StepKind.DRIVE
