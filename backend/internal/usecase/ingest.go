@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/port"
 )
 
 // Ingestor polls every registered source on its own interval and stores the

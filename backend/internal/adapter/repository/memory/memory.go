@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 type key struct {

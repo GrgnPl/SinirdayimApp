@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // RestAreas implements port.RestAreaSource: services, rest areas, truck

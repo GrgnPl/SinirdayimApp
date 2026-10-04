@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // SnapshotSource is a data provider integration (official site, third-party

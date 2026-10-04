@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 const earthRadiusKm = 6371.0

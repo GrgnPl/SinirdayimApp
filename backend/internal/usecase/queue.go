@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/port"
 )
 
 const (

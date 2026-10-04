@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/usecase"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/usecase"
 )
 
 func (h *Handler) getQueue(w http.ResponseWriter, r *http.Request) {

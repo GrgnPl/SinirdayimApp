@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 const (

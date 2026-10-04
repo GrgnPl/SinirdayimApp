@@ -1,4 +1,4 @@
-module github.com/burakaydin/sinir-bekleme/backend
+module github.com/GrgnPl/SinirdayimApp/backend
 
 go 1.25
 

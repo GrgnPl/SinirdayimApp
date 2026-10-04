@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/geo"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/tacho"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/geo"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/port"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/tacho"
 )
 
 const (

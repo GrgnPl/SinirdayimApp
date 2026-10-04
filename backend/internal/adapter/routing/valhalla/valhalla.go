@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/geo"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/geo"
 )
 
 // DefaultURL is the FOSSGIS public instance: fair use only, fine for

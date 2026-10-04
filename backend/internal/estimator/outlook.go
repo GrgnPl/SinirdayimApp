@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 const (

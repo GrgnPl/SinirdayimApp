@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/repository/memory"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/catalog"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/estimator"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/geo"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/tacho"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/repository/memory"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/catalog"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/estimator"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/geo"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/tacho"
 )
 
 // lineRouter returns a straight route through the given points, each step

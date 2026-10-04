@@ -13,17 +13,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/geocoding/photon"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/httpapi"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/osm"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/repository/memory"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/routing/valhalla"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/adapter/source/und"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/catalog"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/estimator"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/usecase"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/geocoding/photon"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/httpapi"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/osm"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/repository/memory"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/routing/valhalla"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/adapter/source/und"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/catalog"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/estimator"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/port"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/usecase"
 )
 
 func main() {

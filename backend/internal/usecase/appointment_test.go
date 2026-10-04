@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/geo"
-	"github.com/burakaydin/sinir-bekleme/backend/internal/tacho"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/geo"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/tacho"
 )
 
 func sarpAppointment(at time.Time) *Appointment {

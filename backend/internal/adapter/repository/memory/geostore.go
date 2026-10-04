@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // GeoStore is an in-process port.GeoStore.

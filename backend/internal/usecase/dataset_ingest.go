@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/port"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/port"
 )
 
 // DatasetIngestor loads reference data from a source into a store. A failed

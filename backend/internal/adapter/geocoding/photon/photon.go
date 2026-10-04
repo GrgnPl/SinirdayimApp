@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // DefaultURL is the public instance: fair use only, fine for development.

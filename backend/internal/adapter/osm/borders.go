@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // BorderControls implements port.BorderPointSource with OSM

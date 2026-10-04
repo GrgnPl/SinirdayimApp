@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // Static is an in-code catalog. Gate coordinates follow the OSM

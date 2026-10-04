@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/burakaydin/sinir-bekleme/backend/internal/domain"
+	"github.com/GrgnPl/SinirdayimApp/backend/internal/domain"
 )
 
 // Reports is an in-process port.ReportStore.
