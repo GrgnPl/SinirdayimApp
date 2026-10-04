@@ -17,6 +17,7 @@ import (
 type Handler struct {
 	Status   *usecase.StatusService
 	Trips    *usecase.TripService
+	Queue    *usecase.QueueService
 	Geocoder port.Geocoder
 	Log      *slog.Logger
 }
@@ -26,6 +27,8 @@ type Handler struct {
 //	GET /healthz
 //	GET /v1/crossings                     all crossings with current estimates
 //	GET /v1/crossings/{id}?hours=48       one crossing with raw history
+//	GET /v1/crossings/{id}/queue          detailed queue: sources, trend, hourly outlook, driver reports
+//	POST /v1/crossings/{id}/reports       driver report (in_queue / passed)
 //	POST /v1/trips/plan                   truck route with tachograph breaks and border waits
 //	GET /v1/places?q=samsun               place search for origin/destination
 func (h *Handler) Routes() http.Handler {
@@ -35,6 +38,8 @@ func (h *Handler) Routes() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/crossings", h.listCrossings)
 	mux.HandleFunc("GET /v1/crossings/{id}", h.getCrossing)
+	mux.HandleFunc("GET /v1/crossings/{id}/queue", h.getQueue)
+	mux.HandleFunc("POST /v1/crossings/{id}/reports", h.postReport)
 	mux.HandleFunc("POST /v1/trips/plan", h.planTrip)
 	mux.HandleFunc("GET /v1/places", h.searchPlaces)
 	return h.withLogging(withCORS(mux))

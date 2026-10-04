@@ -27,6 +27,8 @@ type StatusService struct {
 	Catalog   port.CrossingCatalog
 	Repo      port.SnapshotRepository
 	Estimator port.Estimator
+	// Reports is optional; with it, estimates include recent driver reports.
+	Reports port.ReportStore
 }
 
 func (s *StatusService) List(ctx context.Context) ([]CrossingStatus, error) {
@@ -70,7 +72,27 @@ func (s *StatusService) Estimate(ctx context.Context, c domain.Crossing, dir dom
 	if err != nil {
 		return domain.WaitEstimate{}, err
 	}
-	return s.Estimator.Estimate(c, dir, latest), nil
+	reports, err := s.recentReports(ctx, c.ID)
+	if err != nil {
+		return domain.WaitEstimate{}, err
+	}
+	return s.estimate(c, dir, latest, reports), nil
+}
+
+func (s *StatusService) estimate(c domain.Crossing, dir domain.Direction, latest []domain.Snapshot, reports []domain.DriverReport) domain.WaitEstimate {
+	est := s.Estimator.Estimate(c, dir, latest)
+	if len(reports) == 0 {
+		return est
+	}
+	return s.Estimator.WithReports(est, c, reports, latestThroughput(latest, dir))
+}
+
+// recentReports returns reports young enough to affect the current state.
+func (s *StatusService) recentReports(ctx context.Context, id domain.CrossingID) ([]domain.DriverReport, error) {
+	if s.Reports == nil {
+		return nil, nil
+	}
+	return s.Reports.Since(ctx, id, time.Now().Add(-reportListWindow))
 }
 
 func (s *StatusService) status(ctx context.Context, c domain.Crossing) (CrossingStatus, error) {
@@ -78,9 +100,13 @@ func (s *StatusService) status(ctx context.Context, c domain.Crossing) (Crossing
 	if err != nil {
 		return CrossingStatus{}, err
 	}
+	reports, err := s.recentReports(ctx, c.ID)
+	if err != nil {
+		return CrossingStatus{}, err
+	}
 	return CrossingStatus{
 		Crossing: c,
-		Export:   s.Estimator.Estimate(c, domain.DirectionExport, latest),
-		Import:   s.Estimator.Estimate(c, domain.DirectionImport, latest),
+		Export:   s.estimate(c, domain.DirectionExport, latest, reports),
+		Import:   s.estimate(c, domain.DirectionImport, latest, reports),
 	}, nil
 }

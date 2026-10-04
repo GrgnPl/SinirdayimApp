@@ -38,9 +38,16 @@ type SnapshotRepository interface {
 	History(ctx context.Context, id domain.CrossingID, since time.Time) ([]domain.Snapshot, error)
 }
 
-// Estimator turns raw snapshots into a wait estimate.
+// Estimator turns observations into wait estimates.
 type Estimator interface {
+	// Estimate uses the newest official snapshots.
 	Estimate(c domain.Crossing, dir domain.Direction, latest []domain.Snapshot) domain.WaitEstimate
+	// WithReports refines an estimate with recent driver reports.
+	WithReports(est domain.WaitEstimate, c domain.Crossing, reports []domain.DriverReport, dailyThroughput *int) domain.WaitEstimate
+	// Trend is how the queue changes, from snapshot history of one source and direction.
+	Trend(c domain.Crossing, history []domain.Snapshot) *domain.Trend
+	// Outlook is the expected wait for each of the next hours.
+	Outlook(est domain.WaitEstimate, dailyThroughput *int, trend *domain.Trend, hours int) []domain.HourOutlook
 }
 
 // Router computes truck routes (Valhalla, HERE, TomTom...). The route must
@@ -78,3 +85,10 @@ type (
 	BorderPointSource = Dataset[domain.BorderPoint]
 	BorderPointStore  = GeoStore[domain.BorderPoint]
 )
+
+// ReportStore keeps driver reports.
+type ReportStore interface {
+	Add(ctx context.Context, r domain.DriverReport) error
+	// Since returns reports for a crossing at or after t, newest first.
+	Since(ctx context.Context, id domain.CrossingID, t time.Time) ([]domain.DriverReport, error)
+}

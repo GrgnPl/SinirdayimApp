@@ -46,12 +46,16 @@ func run(log *slog.Logger) error {
 	sources := []port.SnapshotSource{undSrc}
 
 	repo := memory.New()
+	reports := memory.NewReports()
 	crossings := catalog.NewStatic()
+	est := estimator.NewQueue()
 	status := &usecase.StatusService{
 		Catalog:   crossings,
 		Repo:      repo,
-		Estimator: estimator.NewQueue(),
+		Estimator: est,
+		Reports:   reports,
 	}
+	queue := &usecase.QueueService{Catalog: crossings, Snapshots: repo, Reports: reports, Estimator: est}
 	restAreas := memory.NewRestAreas()
 	borderPoints := memory.NewBorderPoints()
 	trips := &usecase.TripService{
@@ -93,6 +97,7 @@ func run(log *slog.Logger) error {
 		Handler: (&httpapi.Handler{
 			Status:   status,
 			Trips:    trips,
+			Queue:    queue,
 			Geocoder: photon.New(os.Getenv("PHOTON_URL")),
 			Log:      log,
 		}).Routes(),
