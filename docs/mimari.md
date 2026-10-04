@@ -82,6 +82,8 @@ feribot / tren, kapıya varış saatine göre bekleme tahmini.
 |---|---|
 | `GET /v1/crossings` | Tüm kapılar + ihracat/ithalat tahmini |
 | `GET /v1/crossings/{id}?hours=48` | Tek kapı + ham geçmiş (grafik için) |
+| `GET /v1/crossings/{id}/queue` | Detaylı sıra: trend, saatlik görünüm, kaynaklar, şoför bildirimleri |
+| `POST /v1/crossings/{id}/reports` | Şoför bildirimi (sıradayım / geçtim) |
 | `POST /v1/trips/plan` | Rota + takograf molaları + sınır beklemeleri + alternatifler |
 | `GET /v1/places?q=` | Yer arama |
 | `GET /healthz` | Sağlık kontrolü |
