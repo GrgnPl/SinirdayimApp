@@ -1,0 +1,10 @@
+// Shared build settings for the iOS app.
+TEAM_ID = 2P8PWNRKLH
+BUNDLE_ID = com.burakaydin.sinirdayim
+APP_NAME = Sınırdayım
+
+// Backend the app talks to. The simulator can use localhost; a physical
+// device needs the Mac's LAN address. Override in Local.xcconfig (git-ignored).
+API_BASE_URL = http:/$()/localhost:8080
+
+#include? "Local.xcconfig"

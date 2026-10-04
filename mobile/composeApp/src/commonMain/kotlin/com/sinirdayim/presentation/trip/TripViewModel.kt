@@ -1,0 +1,192 @@
+@file:OptIn(ExperimentalTime::class)
+
+package com.sinirdayim.presentation.trip
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.sinirdayim.domain.model.Appointment
+import com.sinirdayim.domain.model.DriverState
+import com.sinirdayim.domain.model.GeoPoint
+import com.sinirdayim.domain.model.Place
+import com.sinirdayim.domain.model.TripPlan
+import com.sinirdayim.domain.model.TripRequest
+import com.sinirdayim.domain.usecase.PlanTripUseCase
+import com.sinirdayim.domain.usecase.SearchPlacesUseCase
+import com.sinirdayim.domain.usecase.TripProgress
+import com.sinirdayim.domain.usecase.TripTracker
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
+
+enum class Endpoint { ORIGIN, DESTINATION }
+
+enum class DepartOption(val label: String) {
+    NOW("Şimdi"),
+    IN_1H("1 sa sonra"),
+    IN_3H("3 sa sonra"),
+    TOMORROW_6("Yarın 06:00"),
+}
+
+data class PlaceField(
+    val query: String = "",
+    val selected: Place? = null,
+    val suggestions: List<Place> = emptyList(),
+)
+
+data class TripUiState(
+    val origin: PlaceField = PlaceField(),
+    val destination: PlaceField = PlaceField(),
+    val activeField: Endpoint? = null,
+    val depart: DepartOption = DepartOption.NOW,
+    val driver: DriverState = DriverState(),
+    val isPlanning: Boolean = false,
+    val plan: TripPlan? = null,
+    val error: String? = null,
+    /** Error from re-planning on the result screen (e.g. a new appointment). */
+    val resultError: String? = null,
+    val tracking: Boolean = false,
+    val progress: TripProgress? = null,
+    val position: GeoPoint? = null,
+    val locationProblem: String? = null,
+) {
+    val canPlan: Boolean get() = origin.selected != null && destination.selected != null && !isPlanning
+    fun field(e: Endpoint) = if (e == Endpoint.ORIGIN) origin else destination
+}
+
+class TripViewModel(
+    private val searchPlaces: SearchPlacesUseCase,
+    private val planTrip: PlanTripUseCase,
+) : ViewModel() {
+    private val _state = MutableStateFlow(TripUiState())
+    val state: StateFlow<TripUiState> = _state.asStateFlow()
+
+    private var searchJob: Job? = null
+
+    fun onQueryChange(endpoint: Endpoint, query: String) {
+        updateField(endpoint) { it.copy(query = query, selected = null) }
+        _state.update { it.copy(activeField = endpoint) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300) // debounce typing
+            val results = try {
+                searchPlaces(query)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            updateField(endpoint) { it.copy(suggestions = results) }
+        }
+    }
+
+    fun onSelect(endpoint: Endpoint, place: Place) {
+        searchJob?.cancel()
+        updateField(endpoint) { PlaceField(query = place.name, selected = place) }
+        _state.update { it.copy(activeField = null) }
+    }
+
+    fun swap() = _state.update { it.copy(origin = it.destination, destination = it.origin) }
+
+    fun onDepart(option: DepartOption) = _state.update { it.copy(depart = option) }
+
+    fun onDriver(driver: DriverState) = _state.update { it.copy(driver = driver) }
+
+    /** Request of the plan on screen, reused when an appointment changes. */
+    private var lastRequest: TripRequest? = null
+
+    private var tracker: TripTracker? = null
+
+    fun startTracking() = _state.update { it.copy(tracking = true, locationProblem = null) }
+
+    fun stopTracking() = _state.update { it.copy(tracking = false, progress = null, position = null, locationProblem = null) }
+
+    /** A GPS fix while tracking: compare it with the plan on screen. */
+    fun onLocation(position: GeoPoint, at: Instant) {
+        val plan = _state.value.plan ?: return
+        val t = tracker?.takeIf { it.plan === plan } ?: TripTracker(plan).also { tracker = it }
+        _state.update { it.copy(progress = t.progress(position, at), position = position, locationProblem = null) }
+    }
+
+    fun onLocationProblem(message: String) = _state.update { it.copy(locationProblem = message) }
+
+    /** Plans the trip; calls [onDone] on success. */
+    fun plan(onDone: () -> Unit) {
+        val s = _state.value
+        val from = s.origin.selected ?: return
+        val to = s.destination.selected ?: return
+        _state.update { it.copy(isPlanning = true, error = null, activeField = null) }
+        // A new trip starts without an appointment: the old one may not be on the new route.
+        // The driver state is entered now; waiting until a later departure is rest.
+        val request = TripRequest(from.location, to.location, departAt(s.depart), s.driver, stateAt = Clock.System.now())
+        viewModelScope.launch {
+            try {
+                val plan = planTrip(request)
+                lastRequest = request
+                _state.update { it.copy(plan = plan, isPlanning = false, resultError = null) }
+                onDone()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(isPlanning = false, error = "Rota planlanamadı. Noktaları kontrol edip tekrar dene.") }
+            }
+        }
+    }
+
+    /** Re-plans the current trip around a booked slot. */
+    fun setAppointment(crossingId: String, at: Instant) = replan { it.copy(appointment = Appointment(crossingId, at)) }
+
+    fun clearAppointment() = replan { it.copy(appointment = null) }
+
+    /** Re-plans the current trip leaving at [at] instead. */
+    fun departAt(at: Instant) = replan { it.copy(departAt = at) }
+
+    private fun replan(change: (TripRequest) -> TripRequest) {
+        val request = change(lastRequest ?: return)
+        _state.update { it.copy(isPlanning = true, resultError = null) }
+        viewModelScope.launch {
+            try {
+                val plan = planTrip(request)
+                lastRequest = request
+                _state.update { it.copy(plan = plan, isPlanning = false) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(isPlanning = false, resultError = "Randevuyla plan yapılamadı. Saati kontrol edip tekrar dene.") }
+            }
+        }
+    }
+
+    private fun updateField(endpoint: Endpoint, f: (PlaceField) -> PlaceField) = _state.update {
+        if (endpoint == Endpoint.ORIGIN) it.copy(origin = f(it.origin)) else it.copy(destination = f(it.destination))
+    }
+
+    private fun departAt(option: DepartOption): Instant {
+        val now = Clock.System.now()
+        return when (option) {
+            DepartOption.NOW -> now
+            DepartOption.IN_1H -> now + 1.hours
+            DepartOption.IN_3H -> now + 3.hours
+            DepartOption.TOMORROW_6 -> {
+                val tz = TimeZone.currentSystemDefault()
+                val tomorrow = now.toLocalDateTime(tz).date.plus(1, DateTimeUnit.DAY)
+                tomorrow.atTime(LocalTime(6, 0)).toInstant(tz)
+            }
+        }
+    }
+}

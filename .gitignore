@@ -25,3 +25,19 @@ replay_pid*
 
 # Kotlin Gradle plugin data, see https://kotlinlang.org/docs/whatsnew20.html#new-directory-for-kotlin-data-in-gradle-projects
 .kotlin/
+
+# Gradle wrapper must stay in the repo
+!gradle-wrapper.jar
+
+# Sınırdayım
+.DS_Store
+.idea/
+*.iml
+.gradle/
+build/
+local.properties
+/backend/bin/
+mobile/iosApp/Local.xcconfig
+xcuserdata/
+*.xcuserstate
+mobile/iosApp/build/
