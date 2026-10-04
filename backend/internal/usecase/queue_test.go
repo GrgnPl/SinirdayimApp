@@ -81,6 +81,9 @@ func TestDriverReportsOverrideOfficialWait(t *testing.T) {
 	if *dq.Official.WaitMinutes == 150 {
 		t.Error("official estimate must stay separate")
 	}
+	if w := dq.Outlook[0].WaitMinutes; w < 140 || w > 160 {
+		t.Errorf("outlook starts at %d min, want ~150 from the measured wait", w)
+	}
 	if len(dq.Reports) != 3 || dq.Sources[0].Source != "drivers" {
 		t.Errorf("reports = %d, sources = %+v", len(dq.Reports), dq.Sources)
 	}

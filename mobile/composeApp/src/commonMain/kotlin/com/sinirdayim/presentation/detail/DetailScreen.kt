@@ -72,7 +72,7 @@ fun DetailScreen(viewModel: DetailViewModel, onBack: () -> Unit) {
 
         val detail = state.detail
         when {
-            detail != null -> Content(detail, state.direction, viewModel::selectDirection)
+            detail != null -> Content(detail, state, viewModel)
             state.error != null -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(state.error!!, color = colors.onSurfaceVariant)
                 TextButton(onClick = viewModel::refresh) { Text("Tekrar dene") }
@@ -83,10 +83,14 @@ fun DetailScreen(viewModel: DetailViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Content(detail: CrossingDetail, direction: Direction, onDirection: (Direction) -> Unit) {
+private fun Content(detail: CrossingDetail, state: DetailUiState, viewModel: DetailViewModel) {
     val colors = MaterialTheme.colorScheme
+    val direction = state.direction
+    val onDirection = viewModel::selectDirection
     val crossing = detail.status.crossing
-    val est = detail.status.estimate(direction)
+    val queue = state.queue?.of(direction)
+    // The queue view includes driver reports; fall back to the list estimate.
+    val est = queue?.estimate ?: detail.status.estimate(direction)
     val history = detail.history.filter { it.direction == direction }.sortedBy { it.observedAt }
     val latest = history.lastOrNull()
     val (a, b) = crossing.countries
@@ -116,6 +120,12 @@ private fun Content(detail: CrossingDetail, direction: Direction, onDirection: (
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StatTile("Günlük geçiş", latest?.dailyThroughput?.let(::formatNumber) ?: "—", Modifier.weight(1f), unit = "tır")
         StatTile("TIR parkı", latest?.parkedVehicles?.let(::formatNumber) ?: "—", Modifier.weight(1f), unit = "tır")
+    }
+
+    queue?.let {
+        OutlookCard(it)
+        SourcesCard(it)
+        ReportsCard(it, state.sending, state.reportMessage, viewModel::report, viewModel::clearReportMessage)
     }
 
     TrendCard(history, LocalLevelColors.current.of(est.level))
@@ -156,7 +166,7 @@ private fun Hero(est: WaitEstimate) {
         }
         est.dataAt?.let {
             Text(
-                "${est.sources.joinToString { it.uppercase() }} · ${formatRelative(it)} güncellendi",
+                "${est.sources.joinToString { if (it == "drivers") "Şoförler" else it.uppercase() }} · ${formatRelative(it)} güncellendi",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.onSurfaceVariant,
             )
@@ -193,6 +203,9 @@ private fun methodNote(est: WaitEstimate): String {
         "reported" -> "Bekleme süresi kaynak tarafından bildirildi."
         "queue/throughput" -> "Tahmin: kuyruktaki araç sayısı ÷ saatlik geçiş hızı."
         "queue-only" -> "Yalnızca kuyruk uzunluğu biliniyor; süre hesaplanamadı."
+        "driver_reports" -> "Bekleme süresi, son 3 saatte geçen şoförlerin bildirdiği sürelerin ortancası."
+        "driver_queue/throughput" -> "Tahmin: şoförlerin bildirdiği kuyruk ÷ saatlik geçiş hızı."
+        "driver_queue" -> "Kuyruk şoför bildirimlerinden; geçiş hızı bilinmiyor."
         else -> "Bu kapı için henüz veri yok."
     }
     val confidence = when (est.confidence) {

@@ -8,6 +8,8 @@ import com.sinirdayim.domain.repository.CrossingRepository
 import com.sinirdayim.domain.repository.TripRepository
 import com.sinirdayim.domain.usecase.GetCrossingDetailUseCase
 import com.sinirdayim.domain.usecase.GetCrossingsUseCase
+import com.sinirdayim.domain.usecase.GetQueueUseCase
+import com.sinirdayim.domain.usecase.SendReportUseCase
 import com.sinirdayim.domain.usecase.PlanTripUseCase
 import com.sinirdayim.domain.usecase.SearchPlacesUseCase
 
@@ -20,6 +22,8 @@ class AppContainer(apiBaseUrl: String) {
 
     val getCrossings = GetCrossingsUseCase(crossingRepository)
     val getCrossingDetail = GetCrossingDetailUseCase(crossingRepository)
+    val getQueue = GetQueueUseCase(crossingRepository)
+    val sendReport = SendReportUseCase(crossingRepository)
     val searchPlaces = SearchPlacesUseCase(tripRepository)
     val planTrip = PlanTripUseCase(tripRepository)
 }

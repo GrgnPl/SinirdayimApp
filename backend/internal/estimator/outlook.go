@@ -59,6 +59,11 @@ func Outlook(est domain.WaitEstimate, throughput *int, trend *domain.Trend, now 
 		rate = math.Max(trend.VehiclesPerHour, -perHour)
 	}
 	base := float64(*est.Vehicles)
+	// A measured wait describes the queue better than a vehicle count:
+	// start from the queue that wait implies.
+	if est.Method == "driver_reports" && est.WaitMinutes != nil {
+		base = float64(*est.WaitMinutes) / 60 * perHour
+	}
 	// Shift the projection to "now" if the estimate is older.
 	if !est.DataAt.IsZero() && now.After(est.DataAt) {
 		base += rate * math.Min(now.Sub(est.DataAt).Hours(), trendHorizon.Hours())

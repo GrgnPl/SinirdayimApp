@@ -111,7 +111,13 @@ fun App(apiBaseUrl: String) {
                     val route = entry.toRoute<DetailRoute>()
                     DetailScreen(
                         viewModel = viewModel {
-                            DetailViewModel(route.id, Direction.valueOf(route.direction), container.getCrossingDetail)
+                            DetailViewModel(
+                                route.id,
+                                Direction.valueOf(route.direction),
+                                container.getCrossingDetail,
+                                container.getQueue,
+                                container.sendReport,
+                            )
                         },
                         onBack = { nav.popBackStack() },
                     )

@@ -7,6 +7,10 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
@@ -15,6 +19,15 @@ class CrossingApi(private val client: HttpClient) {
 
     suspend fun crossing(id: String, hours: Int): CrossingDetailDto =
         client.get("v1/crossings/$id") { parameter("hours", hours) }.body()
+
+    suspend fun queue(id: String): QueueDetailDto = client.get("v1/crossings/$id/queue").body()
+
+    suspend fun report(id: String, report: DriverReportDto) {
+        client.post("v1/crossings/$id/reports") {
+            contentType(ContentType.Application.Json)
+            setBody(report)
+        }
+    }
 
     companion object {
         fun createClient(baseUrl: String): HttpClient = HttpClient {
