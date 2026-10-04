@@ -10,7 +10,7 @@ sınır beklemelerini ve RSS randevusunu plana katar.
 > Örnek: Samsun'daki bir şoför, Sarp kapısında şu an kaç tır olduğunu, kuyruğun büyüyüp büyümediğini, kapıya
 > hangi saatte varırsa ne kadar bekleyeceğini ve son saatlerde geçen şoförlerin gerçekte ne kadar beklediğini görür.
 
-Android ve iOS için tek kod tabanı (Kotlin / Compose Multiplatform), arka uç Go.
+Android ve iOS için tek kod tabanı (Kotlin / Compose Multiplatform), Backend Go.
 
 ---
 
